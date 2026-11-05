@@ -1,0 +1,96 @@
+{
+  "queries": [
+    {
+      "q": "INV-2024-0101",
+      "mode": "hybrid",
+      "expected_document": "clean_digital_invoice_01.pdf",
+      "description": "Exact invoice number lookup"
+    },
+    {
+      "q": "INV-2024-0207",
+      "mode": "hybrid",
+      "expected_document": "clean_digital_invoice_02.pdf",
+      "description": "Exact invoice number lookup (second doc)"
+    },
+    {
+      "q": "ACME COMPONENTS",
+      "mode": "hybrid",
+      "expected_document": "clean_digital_invoice_01.pdf",
+      "description": "Supplier name search"
+    },
+    {
+      "q": "GLOBAL DISTRIBUTORS",
+      "mode": "hybrid",
+      "expected_document": "clean_digital_invoice_02.pdf",
+      "description": "Supplier name search (second doc)"
+    },
+    {
+      "q": "INDUSTRIAL FASTENERS",
+      "mode": "hybrid",
+      "expected_document": "multi_line_invoice.pdf",
+      "description": "Supplier name search (third doc)"
+    },
+    {
+      "q": "PLAIN SUPPLIES",
+      "mode": "hybrid",
+      "expected_document": "missing_tax_invoice.pdf",
+      "description": "Supplier name search (fourth doc)"
+    },
+    {
+      "q": "Hex bolt M8",
+      "mode": "hybrid",
+      "expected_document": "clean_digital_invoice_01.pdf",
+      "description": "Line item description search"
+    },
+    {
+      "q": "Steel bracket A2",
+      "mode": "hybrid",
+      "expected_document": "clean_digital_invoice_02.pdf",
+      "description": "Line item description search (second doc)"
+    },
+    {
+      "q": "150.00",
+      "mode": "hybrid",
+      "expected_document": "clean_digital_invoice_01.pdf",
+      "description": "Total amount search"
+    },
+    {
+      "q": "GBP",
+      "mode": "hybrid",
+      "expected_document": "clean_digital_invoice_01.pdf",
+      "description": "Currency search"
+    },
+    {
+      "q": "NORTHWIND TRADERS",
+      "mode": "hybrid",
+      "expected_document": "clean_digital_invoice_02.pdf",
+      "description": "Customer name search"
+    },
+    {
+      "q": "Washer M6",
+      "mode": "hybrid",
+      "expected_document": "multi_line_invoice.pdf",
+      "description": "Line item search (multi-line doc)"
+    },
+    {
+      "q": "nonexistent-invoice-9999",
+      "mode": "hybrid",
+      "expected_document": null,
+      "description": "Negative query (should return nothing)"
+    },
+    {
+      "q": "ACME",
+      "mode": "keyword",
+      "expected_document": "clean_digital_invoice_01.pdf",
+      "description": "Keyword mode supplier fragment"
+    },
+    {
+      "q": "invoice total",
+      "mode": "semantic",
+      "expected_document": "clean_digital_invoice_01.pdf",
+      "description": "Semantic query for invoice total"
+    }
+  ],
+  "metrics": ["recall_at_10", "mrr"],
+  "note": "Run against the evaluation dataset after indexing; expected_document is null for negative queries."
+}

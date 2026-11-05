@@ -1,0 +1,73 @@
+# DocIntel root .gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytype/
+.build/
+.develop-eggs/
+dist/
+build/
+*.egg-info/
+.eggs/
+*.egg
+.installed.cfg
+*.manifest
+*.spec
+
+# uv / venv
+.venv/
+.env
+.venv*/**
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Node
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-store/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Antigravity IDE/
+
+# Data / local runtime (dev only)
+backend/data/docintel.db
+backend/data/docintel.db-wal
+backend/data/docintel.db-shm
+backend/data/uploads/**
+backend/tests/data/
+eval/data/
+eval/dataset/
+eval/ground_truth.jsonl
+eval/results.json
+eval/results.csv
+eval/report.md
+
+# Misc
+*.log
+*.tmp
+coverage/
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.terraform/
+
+# Secrets (never commit real values)
+.env.local
+.env.production
