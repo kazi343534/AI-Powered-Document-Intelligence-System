@@ -293,6 +293,11 @@ class FindingUpdateRequest(BaseModel):
     note: str | None = None
 
 
+class ReconciliationUpdateRequest(BaseModel):
+    status: Literal["matched", "dismissed"]
+    note: str | None = None
+
+
 class SearchHit(BaseModel):
     document_id: str
     document: DocumentListItem

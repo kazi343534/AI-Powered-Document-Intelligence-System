@@ -138,7 +138,11 @@ class TestDocumentsListAndDetail:
 
 
 class TestFindings:
-    def test_findings_list_and_update(self, client, auth_headers, make_pdf, process_jobs):
+    def test_findings_list_and_update(
+        self, client, auth_headers, make_pdf, process_jobs, db
+    ):
+        from app.models import Finding
+
         with open(make_pdf, "rb") as handle:
             created = client.post(
                 "/api/v1/documents",
@@ -148,8 +152,21 @@ class TestFindings:
         doc_id = created.json()["documents"][0]["id"]
         process_jobs(doc_id)
         detail = client.get(f"/api/v1/documents/{doc_id}", headers=auth_headers).json()
+        db.add(
+            Finding(
+                document_id=doc_id,
+                invoice_id=detail["invoices"][0]["id"],
+                rule_code="V999",
+                severity="warning",
+                field_path="total",
+                message="Synthetic review finding",
+            )
+        )
+        db.commit()
+
+        detail = client.get(f"/api/v1/documents/{doc_id}", headers=auth_headers).json()
         findings = detail.get("findings", [])
-        assert len(findings) > 0, "expected validation findings from sample PDF"
+        assert len(findings) > 0, "expected the synthetic finding in document detail"
 
         finding_id = findings[0]["id"]
         response = client.patch(
@@ -295,8 +312,24 @@ class TestWorkerRetry:
 
 
 class TestApprove:
+    @staticmethod
+    def _add_open_finding(db, detail):
+        from app.models import Finding
+
+        finding = Finding(
+            document_id=detail["id"],
+            invoice_id=detail["invoices"][0]["id"],
+            rule_code="V999",
+            severity="warning",
+            field_path="total",
+            message="Synthetic review finding",
+        )
+        db.add(finding)
+        db.commit()
+        return finding
+
     def test_approve_blocks_when_findings_open(
-        self, client, auth_headers, make_pdf, process_jobs
+        self, client, auth_headers, make_pdf, process_jobs, db
     ):
         with open(make_pdf, "rb") as handle:
             created = client.post(
@@ -306,6 +339,8 @@ class TestApprove:
             )
         doc_id = created.json()["documents"][0]["id"]
         process_jobs(doc_id)
+        detail = client.get(f"/api/v1/documents/{doc_id}", headers=auth_headers).json()
+        self._add_open_finding(db, detail)
 
         response = client.post(
             f"/api/v1/documents/{doc_id}/approve",
@@ -313,9 +348,10 @@ class TestApprove:
             headers=auth_headers,
         )
         assert response.status_code == 409, response.text
+        assert "1 open finding" in response.text
 
     def test_approve_completes_document_when_findings_resolved(
-        self, client, auth_headers, make_pdf, process_jobs
+        self, client, auth_headers, make_pdf, process_jobs, db
     ):
         with open(make_pdf, "rb") as handle:
             created = client.post(
@@ -326,6 +362,8 @@ class TestApprove:
         doc_id = created.json()["documents"][0]["id"]
         process_jobs(doc_id)
 
+        detail = client.get(f"/api/v1/documents/{doc_id}", headers=auth_headers).json()
+        self._add_open_finding(db, detail)
         detail = client.get(f"/api/v1/documents/{doc_id}", headers=auth_headers).json()
         for finding in detail.get("findings") or []:
             response = client.patch(
@@ -345,4 +383,265 @@ class TestApprove:
         assert body["document_id"] == doc_id
         assert body["status"] == "completed"
         assert len(body["approved_invoice_ids"]) >= 1
+
+
+class TestReconciliationDismissal:
+    def test_dismiss_mismatch_unblocks_document_approval(
+        self, client, auth_headers, make_pdf, process_jobs, db
+    ):
+        from app.models import Reconciliation
+
+        with open(make_pdf, "rb") as handle:
+            created = client.post(
+                "/api/v1/documents",
+                files={"files": ("invoice.pdf", handle, "application/pdf")},
+                headers=auth_headers,
+            )
+        doc_id = created.json()["documents"][0]["id"]
+        process_jobs(doc_id)
+
+        detail = client.get(f"/api/v1/documents/{doc_id}", headers=auth_headers).json()
+        for finding in detail.get("findings") or []:
+            response = client.patch(
+                f"/api/v1/findings/{finding['id']}",
+                json={"status": "resolved"},
+                headers=auth_headers,
+            )
+            assert response.status_code == 200, response.text
+
+        reconciliation = Reconciliation(
+            invoice_id=detail["invoices"][0]["id"],
+            match_type="pdf_sheet",
+            confidence=0.95,
+            diffs=[
+                {
+                    "field": "total",
+                    "invoice_value": "150.00",
+                    "sheet_value": "999.00",
+                    "severity": "error",
+                }
+            ],
+            status="mismatch",
+        )
+        db.add(reconciliation)
+        db.commit()
+        reconciliation_id = reconciliation.id
+
+        blocked = client.post(
+            f"/api/v1/documents/{doc_id}/approve",
+            json={"note": "blocked by mismatch"},
+            headers=auth_headers,
+        )
+        assert blocked.status_code == 409, blocked.text
+        assert "1 reconciliation mismatch" in blocked.text
+
+        updated = client.patch(
+            f"/api/v1/reconciliations/{reconciliation_id}",
+            json={"status": "dismissed", "note": "known timing difference"},
+            headers=auth_headers,
+        )
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["status"] == "dismissed"
+
+        approved = client.post(
+            f"/api/v1/documents/{doc_id}/approve",
+            json={"note": "approved after dismissal"},
+            headers=auth_headers,
+        )
+        assert approved.status_code == 200, approved.text
+        assert approved.json()["status"] == "completed"
+
+    def test_other_document_findings_do_not_block_invoice_approval(
+        self, client, auth_headers, make_pdf, process_jobs, db
+    ):
+        """Spreadsheet-side findings belong to the spreadsheet's review, not the PDF."""
+        import secrets
+
+        from app.models import Document, Finding
+
+        with open(make_pdf, "rb") as handle:
+            created = client.post(
+                "/api/v1/documents",
+                files={"files": ("invoice.pdf", handle, "application/pdf")},
+                headers=auth_headers,
+            )
+        doc_id = created.json()["documents"][0]["id"]
+        process_jobs(doc_id)
+        detail = client.get(f"/api/v1/documents/{doc_id}", headers=auth_headers).json()
+
+        sheet = Document(
+            original_filename="ledger.csv",
+            storage_key="documents/aa/ledger.csv",
+            mime_type="text/csv",
+            kind="spreadsheet",
+            size_bytes=10,
+            sha256=secrets.token_hex(32),
+            status="needs_review",
+            stage="review_required",
+            page_count=1,
+        )
+        db.add(sheet)
+        db.flush()
+        db.add(
+            Finding(
+                document_id=sheet.id,
+                invoice_id=detail["invoices"][0]["id"],
+                rule_code="V013",
+                severity="error",
+                field_path="sheet.row.total",
+                message="Spreadsheet row total differs from the PDF invoice",
+            )
+        )
+        db.commit()
+
+        approved = client.post(
+            f"/api/v1/documents/{doc_id}/approve",
+            json={"note": "PDF itself has no findings"},
+            headers=auth_headers,
+        )
+        assert approved.status_code == 200, approved.text
+        assert approved.json()["status"] == "completed"
+
+        sheet_blocked = client.post(
+            f"/api/v1/documents/{sheet.id}/approve",
+            json={"note": "spreadsheet finding is visible here"},
+            headers=auth_headers,
+        )
+        assert sheet_blocked.status_code == 409, sheet_blocked.text
+        assert "1 open finding" in sheet_blocked.text
+
+
+class TestSpreadsheetApproval:
+    @staticmethod
+    def _create_spreadsheet(db):
+        import secrets
+
+        from app.models import Document
+
+        document = Document(
+            original_filename="ledger.csv",
+            storage_key="documents/aa/ledger.csv",
+            mime_type="text/csv",
+            kind="spreadsheet",
+            size_bytes=10,
+            sha256=secrets.token_hex(32),
+            status="needs_review",
+            stage="review_required",
+            page_count=1,
+        )
+        db.add(document)
+        db.commit()
+        return document
+
+    def test_approve_spreadsheet_without_invoices(self, client, auth_headers, db):
+        document = self._create_spreadsheet(db)
+        response = client.post(
+            f"/api/v1/documents/{document.id}/approve",
+            json={"note": "spreadsheet approved"},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["status"] == "completed"
+        assert body["approved_invoice_ids"] == []
+
+        detail = client.get(
+            f"/api/v1/documents/{document.id}", headers=auth_headers
+        ).json()
+        assert detail["status"] == "completed"
+        assert detail["invoices"] == []
+
+    def test_spreadsheet_blocks_blocking_findings(self, client, auth_headers, db):
+        from app.models import Finding
+
+        document = self._create_spreadsheet(db)
+        finding = Finding(
+            document_id=document.id,
+            rule_code="V014",
+            severity="warning",
+            field_path="row.total",
+            message="Spreadsheet row subtotal + tax does not equal total",
+        )
+        db.add(finding)
+        db.commit()
+
+        blocked = client.post(
+            f"/api/v1/documents/{document.id}/approve",
+            json={"note": "blocked"},
+            headers=auth_headers,
+        )
+        assert blocked.status_code == 409, blocked.text
+        assert "1 open finding" in blocked.text
+
+        resolved = client.patch(
+            f"/api/v1/findings/{finding.id}",
+            json={"status": "dismissed"},
+            headers=auth_headers,
+        )
+        assert resolved.status_code == 200, resolved.text
+
+        approved = client.post(
+            f"/api/v1/documents/{document.id}/approve",
+            json={"note": "approved after dismissal"},
+            headers=auth_headers,
+        )
+        assert approved.status_code == 200, approved.text
+
+    def test_spreadsheet_mismatch_blocks_until_dismissed(
+        self, client, auth_headers, db, make_pdf, process_jobs
+    ):
+        from app.models import Reconciliation
+
+        document = self._create_spreadsheet(db)
+        with open(make_pdf, "rb") as handle:
+            created = client.post(
+                "/api/v1/documents",
+                files={"files": ("invoice.pdf", handle, "application/pdf")},
+                headers=auth_headers,
+            )
+        pdf_id = created.json()["documents"][0]["id"]
+        process_jobs(pdf_id)
+        pdf_detail = client.get(
+            f"/api/v1/documents/{pdf_id}", headers=auth_headers
+        ).json()
+
+        reconciliation = Reconciliation(
+            invoice_id=pdf_detail["invoices"][0]["id"],
+            matched_document_id=document.id,
+            match_type="pdf_sheet",
+            confidence=0.95,
+            diffs=[
+                {
+                    "field": "total",
+                    "invoice_value": "150.00",
+                    "sheet_value": "999.00",
+                    "severity": "error",
+                }
+            ],
+            status="mismatch",
+        )
+        db.add(reconciliation)
+        db.commit()
+
+        blocked = client.post(
+            f"/api/v1/documents/{document.id}/approve",
+            json={"note": "blocked by sheet mismatch"},
+            headers=auth_headers,
+        )
+        assert blocked.status_code == 409, blocked.text
+        assert "1 reconciliation mismatch" in blocked.text
+
+        dismissed = client.patch(
+            f"/api/v1/reconciliations/{reconciliation.id}",
+            json={"status": "dismissed", "note": "row belongs to a different period"},
+            headers=auth_headers,
+        )
+        assert dismissed.status_code == 200, dismissed.text
+
+        approved = client.post(
+            f"/api/v1/documents/{document.id}/approve",
+            json={"note": "approved after dismissal"},
+            headers=auth_headers,
+        )
+        assert approved.status_code == 200, approved.text
 

@@ -24,12 +24,14 @@ docintel/
 ├── README.md
 ├── PLAN.md                 # 5-day execution plan (authored up front)
 ├── Makefile                # convenience targets
+├── render.yaml             # Render blueprint for API + web services
 ├── .env.example            # copy to .env and fill in secrets
 ├── backend/                # FastAPI app (Python 3.12, uv)
 │   ├── app/                # models, API, pipeline, worker, search, OCR, parsers
-│   ├── tests/              # pytest suite (62 tests, deterministic, offline)
+│   ├── tests/              # pytest suite (74 tests, deterministic, offline)
 │   ├── data/               # local SQLite DB + uploads (dev only, gitignored)
-│   └── pyproject.toml
+│   ├── pyproject.toml
+│   └── requirements.txt    # pinned production deps (Render)
 ├── frontend/               # Next.js 15 + Tailwind app
 │   ├── app/                # App Router pages (login, upload, documents, search, jobs)
 │   ├── components/         # shared UI, review editor, findings, sheets
@@ -116,11 +118,14 @@ cookie; demo login `admin@docintel.local` / `admin12345`.
 | `GET` | `/documents/{id}` | Detail: pages, invoices, findings, jobs |
 | `GET` | `/documents/{id}/text` | Page text (digital or OCR) |
 | `POST` | `/documents/{id}/reprocess` | Re-queue processing |
+| `POST` | `/documents/{id}/approve` | Approve invoices or a spreadsheet |
 | `GET` | `/invoices/{id}/extractions` | Revision history |
 | `PATCH` | `/invoices/{id}/extractions/{eid}` | Correct → new immutable revision |
 | `POST` | `/invoices/{id}/review` | Approve / reopen |
 | `GET` | `/findings` | Validation findings |
 | `PATCH` | `/findings/{id}` | Resolve / dismiss |
+| `GET` | `/reconciliations` | Cross-document matches |
+| `PATCH` | `/reconciliations/{id}` | Accept or dismiss a mismatch |
 | `GET` | `/search?q=&mode=` | keyword / semantic / hybrid |
 | `GET` | `/jobs` | Job queue + retry failed |
 | `GET` | `/meta` | Engine/runtime status |
@@ -165,11 +170,36 @@ See `docs/supabase-setup.md` for provisioning Postgres + pgvector + Storage and
 pointing the backend at it via `DATABASE_URL`, `SUPABASE_URL`,
 `SUPABASE_SERVICE_KEY`, and `STORAGE_BACKEND=supabase`.
 
+## Deploy on Render
+
+The repository includes `render.yaml`, which defines two free web services:
+
+- `docintel-api` — FastAPI; installs `backend/requirements.txt`, runs the API
+  with the in-process worker (`AUTO_WORKER=true`), and health-checks
+  `/health/ready`.
+- `docintel-web` — Next.js; proxies `/api/*` and `/health/*` to `BACKEND_URL`.
+
+1. In Render, choose **New → Blueprint**, connect this GitHub repository, and
+   apply the blueprint.
+2. Fill the `sync: false` secrets when prompted:
+   - API: `DATABASE_URL` (Supabase pooler URL; transaction mode on port 6543
+     or session mode on 5432), `SUPABASE_URL`,
+     `SUPABASE_SERVICE_KEY`, `FRONTEND_ORIGIN` (the web service URL), and
+     `GROQ_API_KEY` (optional; deterministic extraction works without it).
+   - Web: `BACKEND_URL` (the API service URL, no trailing slash).
+3. Deploy the API first, then the web app, and set each service's URL in the
+   other service's environment.
+
+`backend/.python-version` and `PYTHON_VERSION=3.12.7` keep Render on Python
+3.12 (the project supports `>=3.12,<3.14`). The blueprint uses the `hash`
+embedding provider to fit Render's free 512 MB instance; switch
+`EMBEDDING_PROVIDER` to `fastembed` on a larger plan for model embeddings.
+
 ## Tests
 
 ```bash
 cd backend
-uv run pytest tests/ -q   # 62 tests, fully offline (no live LLM)
+uv run pytest tests/ -q   # 74 tests, fully offline (no live LLM)
 ```
 
 Tests cover normalization, page grouping, deterministic extraction, validation

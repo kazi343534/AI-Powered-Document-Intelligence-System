@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from ..database import get_db
@@ -304,7 +304,11 @@ def _approve_invoice(db: Session, invoice: Invoice, user: User, note: str | None
     blocking = list(
         db.scalars(
             select(Finding).where(
-                Finding.invoice_id == invoice.id,
+                Finding.document_id == invoice.document_id,
+                or_(
+                    Finding.invoice_id == invoice.id,
+                    Finding.invoice_id.is_(None),
+                ),
                 Finding.status == "open",
                 Finding.severity.in_(["error", "warning"]),
             )
@@ -313,7 +317,10 @@ def _approve_invoice(db: Session, invoice: Invoice, user: User, note: str | None
     mismatches = list(
         db.scalars(
             select(Reconciliation).where(
-                Reconciliation.invoice_id == invoice.id,
+                or_(
+                    Reconciliation.invoice_id == invoice.id,
+                    Reconciliation.matched_invoice_id == invoice.id,
+                ),
                 Reconciliation.status == "mismatch",
             )
         )

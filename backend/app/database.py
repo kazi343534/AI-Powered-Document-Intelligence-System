@@ -19,10 +19,17 @@ if settings.is_sqlite:
     if db_path and db_path != ":memory:":
         Path(db_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
     _connect_args = {"check_same_thread": False}
+elif settings.is_postgres:
+    # Supabase's transaction pooler (PgBouncer, port 6543) does not support
+    # server-side prepared statements. psycopg prepares statements after five
+    # executions by default, which otherwise surfaces as
+    # "prepared statement ... does not exist" mid-job.
+    _connect_args = {"prepare_threshold": None}
 
 engine = create_engine(
     settings.database_url,
     pool_pre_ping=True,
+    pool_recycle=180,
     connect_args=_connect_args,
     future=True,
 )

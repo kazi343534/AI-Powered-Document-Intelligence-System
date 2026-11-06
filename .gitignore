@@ -51,6 +51,7 @@ backend/data/docintel.db-wal
 backend/data/docintel.db-shm
 backend/data/uploads/**
 backend/tests/data/
+backend/eval/data/
 eval/data/
 eval/dataset/
 eval/ground_truth.jsonl

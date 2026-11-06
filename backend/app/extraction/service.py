@@ -159,7 +159,10 @@ def _merge_field(key: str, ai: FieldValue, det: FieldValue) -> FieldValue:
         return chosen
     if det.value is not None:
         fallback = det.model_copy(deep=True)
-        fallback.confidence = min(fallback.confidence, 0.8)
+        # Deterministic values carry their own evidence-calibrated confidence;
+        # do not collapse clean, high-quality OCR/digital extractions to a fixed
+        # low prior (that would always force manual review).
+        fallback.confidence = min(fallback.confidence, 0.95)
         return fallback
     return FieldValue()
 

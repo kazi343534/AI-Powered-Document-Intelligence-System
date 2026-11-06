@@ -86,6 +86,21 @@ def extraction_out(extraction: Extraction) -> ExtractionOut:
     )
 
 
+def reconciliation_out(item: Reconciliation) -> ReconciliationOut:
+    return ReconciliationOut(
+        id=item.id,
+        invoice_id=item.invoice_id,
+        matched_invoice_id=item.matched_invoice_id,
+        matched_document_id=item.matched_document_id,
+        sheet_row_id=item.sheet_row_id,
+        match_type=item.match_type,
+        confidence=item.confidence,
+        diffs=item.diffs or [],
+        status=item.status,
+        created_at=item.created_at,
+    )
+
+
 def invoice_out(
     db: Session, invoice: Invoice, include_findings: bool = True
 ) -> InvoiceOut:
@@ -220,19 +235,5 @@ def document_detail(db: Session, document: Document, include_text: bool = False)
         ],
         findings=findings,
         jobs=jobs,
-        reconciliations=[
-            ReconciliationOut(
-                id=item.id,
-                invoice_id=item.invoice_id,
-                matched_invoice_id=item.matched_invoice_id,
-                matched_document_id=item.matched_document_id,
-                sheet_row_id=item.sheet_row_id,
-                match_type=item.match_type,
-                confidence=item.confidence,
-                diffs=item.diffs or [],
-                status=item.status,
-                created_at=item.created_at,
-            )
-            for item in reconciliations
-        ],
+        reconciliations=[reconciliation_out(item) for item in reconciliations],
     )

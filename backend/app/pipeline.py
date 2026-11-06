@@ -332,11 +332,14 @@ def _process_pdf(
 
     total_groups = max(len(groups), 1)
     for index, group in enumerate(groups, start=1):
-        group_pages = [
-            (page_number, page_map[page_number].text)
-            for page_number in range(group.page_start, group.page_end + 1)
-            if page_number in page_map
-        ]
+        if group.page_texts:
+            group_pages = list(group.page_texts)
+        else:
+            group_pages = [
+                (page_number, page_map[page_number].text)
+                for page_number in range(group.page_start, group.page_end + 1)
+                if page_number in page_map
+            ]
         invoice = Invoice(
             document_id=document.id,
             page_start=group.page_start,

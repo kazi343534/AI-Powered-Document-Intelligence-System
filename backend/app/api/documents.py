@@ -19,7 +19,16 @@ from ..ingest_validation import (
     safe_filename,
     validate_file,
 )
-from ..models import Document, DocumentPage, Finding, Invoice, ProcessingJob, SheetRow, User
+from ..models import (
+    Document,
+    DocumentPage,
+    Finding,
+    Invoice,
+    ProcessingJob,
+    Reconciliation,
+    SheetRow,
+    User,
+)
 from ..parsers.pdf import PdfProcessingError, image_preview, render_pdf_page
 from ..pipeline import enqueue_document, materialize_document, reset_for_reprocess
 from ..presenters import document_detail, document_list_item, finding_out
@@ -474,6 +483,38 @@ def reprocess_document(
     return {"document_id": document.id, "job_id": job.id, "status": "queued"}
 
 
+def _approval_blocked_detail(finding_count: int, mismatch_count: int) -> str:
+    return (
+        f"Cannot approve: {finding_count} open finding(s) and "
+        f"{mismatch_count} reconciliation mismatch(es) must be resolved first"
+    )
+
+
+def _document_blockers(
+    db: Session, document: Document
+) -> tuple[list[Finding], list[Reconciliation]]:
+    """Find document-level checks that are not attached to a single invoice."""
+    findings = list(
+        db.scalars(
+            select(Finding).where(
+                Finding.document_id == document.id,
+                Finding.invoice_id.is_(None),
+                Finding.status == "open",
+                Finding.severity.in_(["error", "warning"]),
+            )
+        )
+    )
+    mismatches = list(
+        db.scalars(
+            select(Reconciliation).where(
+                Reconciliation.matched_document_id == document.id,
+                Reconciliation.status == "mismatch",
+            )
+        )
+    )
+    return findings, mismatches
+
+
 @router.post("/{document_id}/approve")
 def approve_document(
     document_id: str,
@@ -482,21 +523,61 @@ def approve_document(
     user: User = Depends(require_roles("admin", "reviewer")),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Approve a document: approve all of its reviewable invoice extractions.
+    """Approve a document and complete its review.
 
-    Mirrors the per-invoice approval rules (no open error/warning findings and
-    no reconciliation mismatches remain) and marks the document completed on
-    success. Audit trail: document.approve.
+    PDF/image documents approve all reviewable invoice extractions using the
+    per-invoice rules. Spreadsheets have no invoices, so their document-level
+    findings and reconciliation mismatches are checked directly. In both cases
+    the document is marked completed and a document.approve audit event is
+    written.
     """
     document = _get_document(db, document_id)
-    invoices = list(db.scalars(select(Invoice).where(Invoice.document_id == document_id)))
-    reviewable = [invoice for invoice in invoices if invoice.current_extraction_id]
-    if not reviewable:
-        raise HTTPException(status_code=409, detail="Document has no reviewable invoices")
     approved_ids: list[str] = []
-    for invoice in reviewable:
-        approved_invoice = _approve_invoice(db, invoice, user, payload.note)
-        approved_ids.append(approved_invoice.id)
+
+    if document.kind == "spreadsheet":
+        blocking = list(
+            db.scalars(
+                select(Finding).where(
+                    Finding.document_id == document.id,
+                    Finding.status == "open",
+                    Finding.severity.in_(["error", "warning"]),
+                )
+            )
+        )
+        mismatches = list(
+            db.scalars(
+                select(Reconciliation).where(
+                    Reconciliation.matched_document_id == document.id,
+                    Reconciliation.status == "mismatch",
+                )
+            )
+        )
+        if blocking or mismatches:
+            raise HTTPException(
+                status_code=409,
+                detail=_approval_blocked_detail(len(blocking), len(mismatches)),
+            )
+        document.status = "completed"
+        document.stage = "completed"
+    else:
+        invoices = list(
+            db.scalars(select(Invoice).where(Invoice.document_id == document_id))
+        )
+        reviewable = [invoice for invoice in invoices if invoice.current_extraction_id]
+        if not reviewable:
+            raise HTTPException(status_code=409, detail="Document has no reviewable invoices")
+        document_findings, document_mismatches = _document_blockers(db, document)
+        if document_findings or document_mismatches:
+            raise HTTPException(
+                status_code=409,
+                detail=_approval_blocked_detail(
+                    len(document_findings), len(document_mismatches)
+                ),
+            )
+        for invoice in reviewable:
+            approved_invoice = _approve_invoice(db, invoice, user, payload.note)
+            approved_ids.append(approved_invoice.id)
+
     record_audit(
         db,
         user,

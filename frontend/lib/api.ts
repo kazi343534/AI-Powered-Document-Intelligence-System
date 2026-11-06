@@ -13,6 +13,7 @@ import type {
   Extraction,
   Finding,
   Invoice,
+  Reconciliation,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -180,6 +181,17 @@ export function updateFinding(
   note?: string,
 ): Promise<Finding> {
   return apiRequest(`/findings/${findingId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ status, note }),
+  });
+}
+
+export function updateReconciliation(
+  reconciliationId: string,
+  status: "matched" | "dismissed",
+  note?: string,
+): Promise<Reconciliation> {
+  return apiRequest(`/reconciliations/${reconciliationId}`, {
     method: "PATCH",
     body: JSON.stringify({ status, note }),
   });

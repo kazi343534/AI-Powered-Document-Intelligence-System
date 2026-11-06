@@ -31,6 +31,7 @@ import {
   reprocessDocument,
   retryJob,
   updateFinding,
+  updateReconciliation,
 } from "@/lib/api";
 import type { DocumentDetail, Job, PageInfo, Reconciliation } from "@/lib/types";
 import {
@@ -284,7 +285,28 @@ function JobHistory({ jobs, onRetry }: { jobs: Job[]; onRetry: (job: Job) => Pro
   );
 }
 
-function ReconciliationView({ items }: { items: Reconciliation[] }) {
+function ReconciliationView({
+  items,
+  onUpdate,
+}: {
+  items: Reconciliation[];
+  onUpdate: (id: string, status: "matched" | "dismissed") => Promise<void>;
+}) {
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleUpdate(id: string, status: "matched" | "dismissed") {
+    setPendingId(id);
+    setError(null);
+    try {
+      await onUpdate(id, status);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update reconciliation");
+    } finally {
+      setPendingId(null);
+    }
+  }
+
   if (!items.length) {
     return (
       <div className="card">
@@ -299,6 +321,7 @@ function ReconciliationView({ items }: { items: Reconciliation[] }) {
   }
   return (
     <div className="space-y-3">
+      {error ? <Alert tone="error">{error}</Alert> : null}
       {items.map((item) => (
         <div key={item.id} className="card overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-3.5">
@@ -308,11 +331,21 @@ function ReconciliationView({ items }: { items: Reconciliation[] }) {
                   "chip",
                   item.status === "matched"
                     ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
-                    : "bg-amber-50 text-amber-700 ring-amber-200",
+                    : item.status === "dismissed"
+                      ? "bg-slate-100 text-slate-600 ring-slate-200"
+                      : "bg-amber-50 text-amber-700 ring-amber-200",
                 )}
               >
-                {item.status === "matched" ? <CheckCircle2 className="h-3 w-3" /> : <TriangleAlert className="h-3 w-3" />}
-                {item.status === "matched" ? "Matched" : "Mismatch"}
+                {item.status === "mismatch" ? (
+                  <TriangleAlert className="h-3 w-3" />
+                ) : (
+                  <CheckCircle2 className="h-3 w-3" />
+                )}
+                {item.status === "matched"
+                  ? "Matched"
+                  : item.status === "dismissed"
+                    ? "Dismissed"
+                    : "Mismatch"}
               </span>
               <span className="text-xs font-semibold text-slate-700">
                 {item.match_type === "pdf_pdf" ? "PDF ↔ PDF duplicate" : "PDF ↔ spreadsheet"}
@@ -321,14 +354,26 @@ function ReconciliationView({ items }: { items: Reconciliation[] }) {
                 confidence {percent(item.confidence)}
               </span>
             </div>
-            {item.matched_document_id ? (
-              <Link
-                href={`/documents/${item.matched_document_id}`}
-                className="text-[11px] font-semibold text-accent-700 hover:text-accent-800"
-              >
-                Open matched document →
-              </Link>
-            ) : null}
+            <div className="flex flex-wrap items-center gap-2">
+              {item.status === "mismatch" ? (
+                <button
+                  type="button"
+                  onClick={() => void handleUpdate(item.id, "dismissed")}
+                  disabled={pendingId === item.id}
+                  className="btn-secondary btn-sm"
+                >
+                  {pendingId === item.id ? "Dismissing…" : "Dismiss mismatch"}
+                </button>
+              ) : null}
+              {item.matched_document_id ? (
+                <Link
+                  href={`/documents/${item.matched_document_id}`}
+                  className="text-[11px] font-semibold text-accent-700 hover:text-accent-800"
+                >
+                  Open matched document →
+                </Link>
+              ) : null}
+            </div>
           </div>
           {item.diffs.length ? (
             <div className="overflow-x-auto">
@@ -369,6 +414,11 @@ function ReconciliationView({ items }: { items: Reconciliation[] }) {
               All comparable values agree. No differences were found.
             </div>
           )}
+          {item.status === "dismissed" ? (
+            <div className="border-t border-slate-100 px-5 py-3 text-xs text-slate-500">
+              This mismatch was dismissed by a reviewer and no longer blocks approval.
+            </div>
+          ) : null}
         </div>
       ))}
     </div>
@@ -448,13 +498,25 @@ export default function DocumentDetailPage() {
   );
 
   const openFindings = doc?.findings.filter((finding) => finding.status === "open").length ?? 0;
+  const blockingFindings =
+    doc?.findings.filter(
+      (finding) =>
+        finding.status === "open" &&
+        (finding.severity === "error" || finding.severity === "warning"),
+    ).length ?? 0;
+  const openMismatches =
+    doc?.reconciliations.filter((item) => item.status === "mismatch").length ?? 0;
+
+  const hasApprovableContent =
+    doc?.kind === "spreadsheet" || !!activeInvoice?.current_extraction;
 
   const canApprove =
     !!doc &&
     doc.status === "needs_review" &&
     !busy &&
-    openFindings === 0 &&
-    !!activeInvoice?.current_extraction;
+    blockingFindings === 0 &&
+    openMismatches === 0 &&
+    hasApprovableContent;
 
   async function handleDownload() {
     if (!doc) return;
@@ -504,6 +566,14 @@ export default function DocumentDetailPage() {
 
   async function handleFindingUpdate(findingId: string, status: "resolved" | "dismissed") {
     await updateFinding(findingId, status);
+    await load(true);
+  }
+
+  async function handleReconciliationUpdate(
+    reconciliationId: string,
+    status: "matched" | "dismissed",
+  ) {
+    await updateReconciliation(reconciliationId, status);
     await load(true);
   }
 
@@ -760,15 +830,36 @@ export default function DocumentDetailPage() {
           <TriangleAlert className="h-4 w-4 shrink-0 text-amber-600" />
           <div className="min-w-0 flex-1 text-xs leading-5 text-amber-800">
             <span className="font-semibold">Human review required.</span>{" "}
-            {openFindings > 0
-              ? `${openFindings} open finding${openFindings === 1 ? "" : "s"} must be resolved or dismissed before approval.`
-              : "Extraction confidence is below the auto-approval threshold."}
+            {blockingFindings > 0 && openMismatches > 0
+              ? `${blockingFindings} blocking finding${blockingFindings === 1 ? "" : "s"} and ${openMismatches} reconciliation mismatch${openMismatches === 1 ? "" : "es"} must be resolved or dismissed before approval.`
+              : blockingFindings > 0
+                ? `${blockingFindings} blocking finding${blockingFindings === 1 ? "" : "s"} must be resolved or dismissed before approval.`
+                : openMismatches > 0
+                  ? `${openMismatches} reconciliation mismatch${openMismatches === 1 ? "" : "es"} must be dismissed before approval.`
+                  : doc.kind === "spreadsheet"
+                    ? "Spreadsheet checks passed. Approve the document to finalize it."
+                    : "Extraction confidence is below the auto-approval threshold. Review the extraction and approve when ready."}
           </div>
-          {doc.findings.length ? (
-            <button type="button" onClick={() => setTab("findings")} className="btn-secondary btn-sm shrink-0">
-              View findings
-            </button>
-          ) : null}
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            {blockingFindings > 0 && doc.findings.length ? (
+              <button
+                type="button"
+                onClick={() => setTab("findings")}
+                className="btn-secondary btn-sm"
+              >
+                View findings
+              </button>
+            ) : null}
+            {openMismatches > 0 ? (
+              <button
+                type="button"
+                onClick={() => setTab("reconciliation")}
+                className="btn-secondary btn-sm"
+              >
+                Review reconciliation
+              </button>
+            ) : null}
+          </div>
         </div>
       ) : null}
 
@@ -934,7 +1025,12 @@ export default function DocumentDetailPage() {
 
       {tab === "history" ? <JobHistory jobs={doc.jobs} onRetry={handleRetry} /> : null}
 
-      {tab === "reconciliation" ? <ReconciliationView items={doc.reconciliations} /> : null}
+      {tab === "reconciliation" ? (
+        <ReconciliationView
+          items={doc.reconciliations}
+          onUpdate={handleReconciliationUpdate}
+        />
+      ) : null}
 
       <div className="mt-6 flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-400">
         <span className="font-mono">document {doc.id}</span>
