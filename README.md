@@ -28,7 +28,7 @@ docintel/
 ├── .env.example            # copy to .env and fill in secrets
 ├── backend/                # FastAPI app (Python 3.12, uv)
 │   ├── app/                # models, API, pipeline, worker, search, OCR, parsers
-│   ├── tests/              # pytest suite (79 tests, deterministic, offline)
+│   ├── tests/              # pytest suite (85 tests, deterministic, offline)
 │   ├── data/               # local SQLite DB + uploads (dev only, gitignored)
 │   ├── pyproject.toml
 │   └── requirements.txt    # pinned production deps (Render)
@@ -120,6 +120,7 @@ cookie; demo login `admin@docintel.local` / `admin12345`.
 | `GET` | `/documents` | List / filter / paginate |
 | `GET` | `/documents/{id}` | Detail: pages, invoices, findings, jobs |
 | `GET` | `/documents/{id}/text` | Page text (digital or OCR) |
+| `GET` | `/documents/{id}/sheet-rows?row_type=` | Invoice/PO records (default) or child line items |
 | `POST` | `/documents/{id}/reprocess` | Re-queue processing |
 | `POST` | `/documents/{id}/approve` | Approve invoices or a spreadsheet |
 | `GET` | `/invoices/{id}/extractions` | Revision history |
@@ -138,9 +139,11 @@ cookie; demo login `admin@docintel.local` / `admin12345`.
 ## Supported file types
 
 PDF, JPG, JPEG, PNG, TIFF, XLSX, XLS, CSV. Multi-page PDFs are grouped into
-logical invoices; multi-sheet spreadsheets are parsed per sheet. Corrupt or
-unsupported files are rejected with a stable error code and never crash the
-batch.
+logical invoices. Spreadsheet sheets are classified as invoice/PO ledgers,
+line-item detail, or reconciliation sheets: only ledgers create top-level
+records, while line items are linked to their parent invoice and surfaced
+separately. Summary/footer rows are skipped. Corrupt or unsupported files are
+rejected with a stable error code and never crash the batch.
 
 ## Background processing
 
@@ -203,7 +206,7 @@ embedding provider to fit Render's free 512 MB instance; switch
 
 ```bash
 cd backend
-uv run pytest tests/ -q   # 79 tests, fully offline (no live LLM)
+uv run pytest tests/ -q   # 85 tests, fully offline (no live LLM)
 ```
 
 Tests cover normalization, page grouping, deterministic extraction, validation

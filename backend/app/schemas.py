@@ -399,8 +399,13 @@ class SheetRowOut(BaseModel):
     data: dict[str, Any]
     normalized: dict[str, Any]
     warnings: list[Any]
+    row_type: str = "invoice"
+    parent_invoice_number: str | None = None
+    line_item_count: int = 0
 
 
 class SheetRowsResponse(BaseModel):
     items: list[SheetRowOut]
     total: int
+    invoice_total: int = 0
+    line_item_total: int = 0

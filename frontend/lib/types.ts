@@ -211,6 +211,16 @@ export interface SheetRow {
   data: Record<string, unknown>;
   normalized: Record<string, unknown>;
   warnings: string[];
+  row_type: "invoice" | "line_item";
+  parent_invoice_number: string | null;
+  line_item_count: number;
+}
+
+export interface SheetRowsResponse {
+  items: SheetRow[];
+  total: number;
+  invoice_total: number;
+  line_item_total: number;
 }
 
 export interface SearchHit {

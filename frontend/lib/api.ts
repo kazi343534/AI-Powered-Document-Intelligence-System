@@ -7,7 +7,7 @@ import type {
   LoginResponse,
   Meta,
   SearchResponse,
-  SheetRow,
+  SheetRowsResponse,
   UploadResponse,
   User,
   Extraction,
@@ -245,8 +245,13 @@ export function getSheetRows(
   offset = 0,
   limit = 100,
   sheet?: string,
-): Promise<{ items: SheetRow[]; total: number }> {
-  const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+  rowType: "invoice" | "line_item" | "all" = "invoice",
+): Promise<SheetRowsResponse> {
+  const params = new URLSearchParams({
+    offset: String(offset),
+    limit: String(limit),
+    row_type: rowType,
+  });
   if (sheet) params.set("sheet", sheet);
   return apiRequest(`/documents/${documentId}/sheet-rows?${params.toString()}`);
 }

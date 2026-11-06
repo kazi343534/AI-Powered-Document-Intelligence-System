@@ -381,7 +381,7 @@ def _spreadsheet_extra_texts(sheets: list[ParsedSheet]) -> list[tuple[str, str |
     items: list[tuple[str, str | None]] = []
     for sheet in sheets:
         lines = [f"Spreadsheet sheet: {sheet.name}", "Columns: " + " | ".join(sheet.headers)]
-        for row in sheet.rows:
+        for row in [*sheet.rows, *sheet.line_items]:
             values = [str(value) for value in row["data"].values() if value not in (None, "")]
             if values:
                 lines.append(" | ".join(values))
@@ -408,7 +408,7 @@ def _process_spreadsheet(
 
     row_records: list[SheetRow] = []
     for sheet in sheets:
-        for row in sheet.rows:
+        for row in [*sheet.rows, *sheet.line_items]:
             record = SheetRow(
                 document_id=document.id,
                 sheet_name=sheet.name,

@@ -12,6 +12,7 @@ from .config import get_settings
 from .models import Document, Extraction, Invoice, SheetRow
 from .schemas import ExtractionData
 from .utils import (
+    money_str,
     normalize_invoice_number,
     normalize_supplier,
     parse_date_flexible,
@@ -514,12 +515,24 @@ def _duplicate_diffs(db: Session, duplicate: Invoice, data: ExtractionData) -> l
     return diffs
 
 
+def _add_row_warning(row: SheetRow, warning: str) -> None:
+    warnings = list(row.warnings or [])
+    if warning not in warnings:
+        warnings.append(warning)
+    row.warnings = warnings
+
+
 def validate_sheet_document(
     db: Session, document: Document, rows: list[SheetRow]
 ) -> ValidationResult:
     result = ValidationResult()
     seen_numbers: dict[str, SheetRow] = {}
-    for index, row in enumerate(rows):
+    invoice_rows = [
+        row
+        for row in rows
+        if str((row.normalized or {}).get("row_type") or "invoice") == "invoice"
+    ]
+    for index, row in enumerate(invoice_rows):
         if index >= 100:
             break
         normalized = row.normalized or {}
@@ -540,13 +553,16 @@ def validate_sheet_document(
             )
         else:
             if invoice_key and invoice_key in seen_numbers:
+                first_row = seen_numbers[invoice_key]
+                _add_row_warning(first_row, "duplicate invoice number")
+                _add_row_warning(row, "duplicate invoice number")
                 _add(
                     result,
                     "V014",
                     "error",
                     f"{location}.invoice_number",
                     f"Duplicate invoice number inside spreadsheet: {invoice_number}",
-                    expected=f"row {seen_numbers[invoice_key].row_number}",
+                    expected=f"row {first_row.row_number}",
                     actual=f"row {row.row_number}",
                 )
             elif invoice_key:
@@ -560,15 +576,23 @@ def validate_sheet_document(
                 f"{location}.total",
                 f"Row {row.row_number} in '{row.sheet_name}' has no total",
             )
+        if subtotal is None and tax is not None and total is not None:
+            _add_row_warning(row, "invalid or missing subtotal")
         if subtotal is not None and tax is not None and total is not None:
             if abs(subtotal + tax - total) > MONEY_TOLERANCE:
+                expected_total = subtotal + tax
+                _add_row_warning(
+                    row,
+                    f"math mismatch: subtotal + tax ({money_str(expected_total)}) "
+                    f"!= total ({money_str(total)})",
+                )
                 _add(
                     result,
                     "V014",
                     "error",
                     f"{location}.total",
                     "Spreadsheet row subtotal + tax does not equal total",
-                    expected=str(subtotal + tax),
+                    expected=str(expected_total),
                     actual=str(total),
                 )
 

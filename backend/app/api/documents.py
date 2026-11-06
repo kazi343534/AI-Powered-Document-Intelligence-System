@@ -425,6 +425,7 @@ def get_document_findings(
 def get_sheet_rows(
     document_id: str,
     sheet: str | None = None,
+    row_type: str = Query("invoice", pattern="^(invoice|line_item|all)$"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     user: User = Depends(get_current_user),
@@ -436,13 +437,25 @@ def get_sheet_rows(
     conditions = [SheetRow.document_id == document.id]
     if sheet:
         conditions.append(SheetRow.sheet_name == sheet)
-    total = db.scalar(select(func.count()).select_from(SheetRow).where(*conditions)) or 0
-    rows = db.scalars(
-        select(SheetRow)
-        .where(*conditions)
-        .order_by(SheetRow.sheet_name, SheetRow.row_number)
-        .offset(offset)
-        .limit(limit)
+    rows = list(
+        db.scalars(
+            select(SheetRow)
+            .where(*conditions)
+            .order_by(SheetRow.sheet_name, SheetRow.row_number)
+        )
+    )
+
+    def _type(item: SheetRow) -> str:
+        return str((item.normalized or {}).get("row_type") or "invoice")
+
+    invoice_rows = [item for item in rows if _type(item) == "invoice"]
+    line_item_rows = [item for item in rows if _type(item) == "line_item"]
+    selected = (
+        rows
+        if row_type == "all"
+        else invoice_rows
+        if row_type == "invoice"
+        else line_item_rows
     )
     return SheetRowsResponse(
         items=[
@@ -453,10 +466,17 @@ def get_sheet_rows(
                 data=row.data or {},
                 normalized=row.normalized or {},
                 warnings=row.warnings or [],
+                row_type=_type(row),
+                parent_invoice_number=(row.normalized or {}).get(
+                    "parent_invoice_number"
+                ),
+                line_item_count=len((row.normalized or {}).get("line_items") or []),
             )
-            for row in rows
+            for row in selected[offset : offset + limit]
         ],
-        total=total,
+        total=len(selected),
+        invoice_total=len(invoice_rows),
+        line_item_total=len(line_item_rows),
     )
 
 

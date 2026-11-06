@@ -1,6 +1,12 @@
 """End-to-end API tests: auth, uploads, findings, corrections, search, jobs."""
 
+from pathlib import Path
 
+CROSS_VERIFICATION_WORKBOOK = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "invoice_test_suite_cross_verification.xlsx"
+)
 
 
 class TestAuth:
@@ -644,4 +650,120 @@ class TestSpreadsheetApproval:
             headers=auth_headers,
         )
         assert approved.status_code == 200, approved.text
+
+
+class TestCrossVerificationWorkbook:
+    def _upload(self, client, auth_headers):
+        with open(CROSS_VERIFICATION_WORKBOOK, "rb") as handle:
+            response = client.post(
+                "/api/v1/documents",
+                files={
+                    "files": (
+                        CROSS_VERIFICATION_WORKBOOK.name,
+                        handle,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+                },
+                headers=auth_headers,
+            )
+        assert response.status_code == 202, response.text
+        document = response.json()["documents"][0]
+        assert document["kind"] == "spreadsheet"
+        return document["id"]
+
+    def test_invoice_and_line_item_records(
+        self, client, auth_headers, process_jobs
+    ):
+        document_id = self._upload(client, auth_headers)
+        process_jobs(document_id)
+
+        response = client.get(
+            f"/api/v1/documents/{document_id}/sheet-rows", headers=auth_headers
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["invoice_total"] == 14
+        assert body["line_item_total"] == 20
+        assert body["total"] == 14
+        assert len(body["items"]) == 14
+        assert all(item["row_type"] == "invoice" for item in body["items"])
+        assert {item["sheet_name"] for item in body["items"]} == {
+            "Master_PO_Ledger",
+            "Dirty_Data_Stress_Test",
+        }
+
+        rows = {(item["sheet_name"], item["row_number"]): item for item in body["items"]}
+        assert ("Master_PO_Ledger", 10) not in rows
+        assert ("Dirty_Data_Stress_Test", 6) not in rows
+
+        master = rows[("Master_PO_Ledger", 2)]
+        assert master["normalized"]["supplier_name"] == "Apex Cloud Solutions Inc."
+        assert master["normalized"]["customer_name"] == "Global FinTech Corp"
+        assert master["normalized"]["currency"] == "USD"
+        assert master["line_item_count"] == 6
+
+        invalid_date = rows[("Dirty_Data_Stress_Test", 4)]
+        assert invalid_date["normalized"]["invoice_date"] is None
+        assert "invalid date format" in invalid_date["warnings"]
+
+        invalid_subtotal = rows[("Dirty_Data_Stress_Test", 5)]
+        assert invalid_subtotal["normalized"]["subtotal"] is None
+        assert "invalid or missing subtotal" in invalid_subtotal["warnings"]
+
+        unknown_currency = rows[("Dirty_Data_Stress_Test", 7)]
+        assert unknown_currency["normalized"]["currency"] == "XYZ"
+        assert "invalid currency (XYZ)" in unknown_currency["warnings"]
+        assert any(
+            warning.startswith(
+                "math mismatch: subtotal + tax (4500.00) != total (4100.00)"
+            )
+            for warning in unknown_currency["warnings"]
+        )
+
+        for row_number in (2, 8):
+            assert "duplicate invoice number" in rows[
+                ("Dirty_Data_Stress_Test", row_number)
+            ]["warnings"]
+        for row_number in (2, 6):
+            assert "duplicate invoice number" in rows[
+                ("Master_PO_Ledger", row_number)
+            ]["warnings"]
+
+    def test_line_item_records_and_parent_links(
+        self, client, auth_headers, process_jobs
+    ):
+        document_id = self._upload(client, auth_headers)
+        process_jobs(document_id)
+
+        response = client.get(
+            f"/api/v1/documents/{document_id}/sheet-rows",
+            params={"row_type": "line_item", "limit": 100},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["invoice_total"] == 14
+        assert body["line_item_total"] == 20
+        assert body["total"] == 20
+        assert len(body["items"]) == 20
+        assert {item["sheet_name"] for item in body["items"]} == {"Line_Items_Detail"}
+        assert all(item["row_type"] == "line_item" for item in body["items"])
+
+        linked = [item for item in body["items"] if item["normalized"]["linked"]]
+        unlinked = [item for item in body["items"] if not item["normalized"]["linked"]]
+        assert len(linked) == 17
+        assert len(unlinked) == 3
+        assert {item["parent_invoice_number"] for item in linked} == {
+            "INV-2026-00101",
+            "INV-2026-00102",
+            "INV-2026-00103",
+            "INV-2026-00107",
+        }
+        assert all(item["parent_invoice_number"] is None for item in unlinked)
+
+        first = min(linked, key=lambda item: item["row_number"])
+        assert first["normalized"]["sku"] == "CLD-ENT-01"
+        assert first["normalized"]["quantity"] == "2"
+        assert first["normalized"]["unit_price"] == "3200"
+        assert first["normalized"]["line_total"] == "6400"
 

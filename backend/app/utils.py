@@ -46,6 +46,24 @@ CURRENCY_CODES = {
     "BDT",
 }
 
+# Active ISO 4217 currency codes, excluding fund, metal, and testing codes.
+ISO_4217_CODES = CURRENCY_CODES | {
+    "AFN", "ALL", "AMD", "ANG", "AOA", "ARS", "AWG", "AZN", "BAM", "BBD",
+    "BGN", "BHD", "BIF", "BMD", "BND", "BOB", "BSD", "BTN", "BWP", "BYN",
+    "BZD", "CDF", "CLP", "COP", "CRC", "CUP", "CVE", "CZK", "DJF", "DOP",
+    "DZD", "EGP", "ERN", "ETB", "FJD", "FKP", "GEL", "GHS", "GIP", "GMD",
+    "GNF", "GTQ", "GYD", "HNL", "HTG", "HUF", "IDR", "ILS", "IQD", "IRR",
+    "ISK", "JMD", "JOD", "KES", "KGS", "KHR", "KMF", "KPW", "KRW", "KWD",
+    "KYD", "KZT", "LAK", "LBP", "LKR", "LRD", "LSL", "LYD", "MAD", "MDL",
+    "MGA", "MKD", "MMK", "MNT", "MOP", "MRU", "MUR", "MVR", "MWK", "MYR",
+    "MZN", "NAD", "NGN", "NIO", "NPR", "OMR", "PAB", "PEN", "PGK", "PHP",
+    "PLN", "PYG", "QAR", "RON", "RSD", "RUB", "RWF", "SBD", "SCR", "SDG",
+    "SHP", "SLE", "SLL", "SOS", "SRD", "SSP", "STN", "SVC", "SYP", "SZL",
+    "THB", "TJS", "TMT", "TND", "TOP", "TRY", "TTD", "TWD", "TZS", "UAH",
+    "UGX", "UYU", "UZS", "VES", "VND", "VUV", "WST", "XAF", "XCD", "XOF",
+    "XPF", "YER", "ZMW", "ZWL",
+}
+
 INVOICE_PREFIXES = re.compile(
     r"^(?:invoice|inv|bill|doc|document)\s*(?:no|number|num|#|id)?\s*[:#\-]?\s*",
     re.IGNORECASE,
@@ -171,6 +189,25 @@ def normalize_currency(value: str | None, text: str = "") -> str | None:
         if symbol in combined and (value is None or symbol in (value or "")):
             return CURRENCY_SYMBOLS[symbol]
     return None
+
+
+def normalize_currency_cell(value: Any) -> tuple[str | None, bool]:
+    """Normalize one spreadsheet currency cell without guessing from other rows.
+
+    Returns ``(currency, valid)``. Recognized ISO codes/symbols are canonicalized;
+    an explicit unknown value is preserved and reported as invalid so callers can
+    surface a warning instead of silently coercing it to USD.
+    """
+    raw = normalize_whitespace(str(value or ""))
+    if not raw:
+        return None, True
+    upper = raw.upper()
+    if upper in ISO_4217_CODES:
+        return upper, True
+    mapped = normalize_currency(raw, "")
+    if mapped:
+        return mapped, True
+    return raw[:12], False
 
 
 def currency_symbol(currency: str | None) -> str:
