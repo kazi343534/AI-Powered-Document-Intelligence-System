@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
 
-const backend = (process.env.BACKEND_URL || "http://localhost:8000").replace(/\/$/, "");
+const rawBackend = process.env.BACKEND_URL || "http://localhost:8000";
+// Sanitize: strip any wrapping brackets/quotes and trailing slash
+const backend = rawBackend
+  .replace(/^[\[\]"']+|[\[\]"']+$/g, "")
+  .replace(/\/$/, "");
 
 const nextConfig: NextConfig = {
   async rewrites() {
