@@ -28,12 +28,12 @@ docintel/
 ├── .env.example            # copy to .env and fill in secrets
 ├── backend/                # FastAPI app (Python 3.12, uv)
 │   ├── app/                # models, API, pipeline, worker, search, OCR, parsers
-│   ├── tests/              # pytest suite (74 tests, deterministic, offline)
+│   ├── tests/              # pytest suite (79 tests, deterministic, offline)
 │   ├── data/               # local SQLite DB + uploads (dev only, gitignored)
 │   ├── pyproject.toml
 │   └── requirements.txt    # pinned production deps (Render)
 ├── frontend/               # Next.js 15 + Tailwind app
-│   ├── app/                # App Router pages (login, upload, documents, search, jobs)
+│   ├── app/                # App Router pages (login, upload, documents, analytics, search, jobs)
 │   ├── components/         # shared UI, review editor, findings, sheets
 │   └── lib/                # API client, types, format helpers
 ├── eval/                   # evaluation harness
@@ -101,7 +101,10 @@ npm run dev          # http://localhost:3000 (proxies /api to localhost:8000)
    confidence, and validation findings.
 5. Correct a value → a new immutable extraction version is created and
    re-validated. Approve or reopen.
-6. Go to Search and try `"ACME"` or `"INV-2024-0042"` (keyword / semantic /
+6. Open Analytics for monthly and yearly sales charts, currency mix, top
+   suppliers, and review status. Totals use only current extractions, never sum
+   across currencies, and count each invoice identity once.
+7. Go to Search and try `"ACME"` or `"INV-2024-0042"` (keyword / semantic /
    hybrid).
 
 ## Backend API (summary)
@@ -126,6 +129,7 @@ cookie; demo login `admin@docintel.local` / `admin12345`.
 | `PATCH` | `/findings/{id}` | Resolve / dismiss |
 | `GET` | `/reconciliations` | Cross-document matches |
 | `PATCH` | `/reconciliations/{id}` | Accept or dismiss a mismatch |
+| `GET` | `/analytics/sales?currency=&months=&years=` | Monthly/yearly totals, currency mix, top suppliers, review status |
 | `GET` | `/search?q=&mode=` | keyword / semantic / hybrid |
 | `GET` | `/jobs` | Job queue + retry failed |
 | `GET` | `/meta` | Engine/runtime status |
@@ -199,12 +203,12 @@ embedding provider to fit Render's free 512 MB instance; switch
 
 ```bash
 cd backend
-uv run pytest tests/ -q   # 74 tests, fully offline (no live LLM)
+uv run pytest tests/ -q   # 79 tests, fully offline (no live LLM)
 ```
 
 Tests cover normalization, page grouping, deterministic extraction, validation
 rules (V001–V017), spreadsheet parsing, uploads, corrections, auth, search,
-findings, job retries, and duplicate detection.
+findings, job retries, duplicate detection, and duplicate-safe sales analytics.
 
 ## Docs
 

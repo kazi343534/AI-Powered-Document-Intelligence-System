@@ -230,6 +230,60 @@ export interface SearchResponse {
   total: number;
 }
 
+export interface SalesCurrencyBreakdown {
+  currency: string;
+  invoice_count: number;
+  total: number;
+}
+
+export interface SalesSummary {
+  invoice_count: number;
+  total: number;
+  average_invoice: number;
+  supplier_count: number;
+  approved_count: number;
+  pending_count: number;
+  dated_count: number;
+  undated_count: number;
+  missing_total_count: number;
+  excluded_duplicates: number;
+}
+
+export interface SalesPeriodPoint {
+  period: string;
+  label: string;
+  total: number;
+  invoice_count: number;
+  approved_total: number;
+  approved_count: number;
+}
+
+export interface SalesSupplierPoint {
+  supplier_name: string;
+  total: number;
+  invoice_count: number;
+}
+
+export interface SalesStatusPoint {
+  status: "approved" | "pending";
+  count: number;
+  total: number;
+}
+
+export interface SalesAnalytics {
+  currency: string;
+  months: number;
+  years: number;
+  period_start: string;
+  period_end: string;
+  currencies: SalesCurrencyBreakdown[];
+  summary: SalesSummary;
+  monthly: SalesPeriodPoint[];
+  yearly: SalesPeriodPoint[];
+  top_suppliers: SalesSupplierPoint[];
+  statuses: SalesStatusPoint[];
+}
+
 export interface DashboardStats {
   documents: Record<string, number>;
   kinds: Record<string, number>;

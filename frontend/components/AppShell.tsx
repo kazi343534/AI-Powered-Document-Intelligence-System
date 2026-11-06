@@ -4,19 +4,20 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
+  ChartColumn,
+  Cpu,
+  Database,
   Files,
   Gauge,
   ListChecks,
   LogOut,
   Menu,
+  ScanText,
   Search,
   ShieldCheck,
   Sparkles,
   UploadCloud,
   X,
-  Cpu,
-  Database,
-  ScanText,
 } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import { getMeta } from "@/lib/api";
@@ -26,6 +27,7 @@ import { LoadingScreen } from "@/components/ui";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: Gauge },
+  { href: "/analytics", label: "Analytics", icon: ChartColumn },
   { href: "/upload", label: "Upload", icon: UploadCloud },
   { href: "/documents", label: "Documents", icon: Files },
   { href: "/search", label: "Search", icon: Search },
@@ -34,6 +36,7 @@ const NAV = [
 
 const TITLES: Record<string, string> = {
   "/dashboard": "Dashboard",
+  "/analytics": "Sales analytics",
   "/upload": "Upload documents",
   "/documents": "Documents",
   "/search": "Search",

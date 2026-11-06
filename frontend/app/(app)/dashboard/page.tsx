@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   ArrowRight,
+  ChartColumn,
   CheckCircle2,
   Clock,
   FileStack,
@@ -115,6 +116,9 @@ export default function DashboardPage() {
         description="Monitor processing, resolve exceptions, and keep extraction quality high."
         actions={
           <>
+            <Link href="/analytics" className="btn-secondary">
+              <ChartColumn className="h-4 w-4" /> Analytics
+            </Link>
             <Link href="/documents" className="btn-secondary">
               <FileStack className="h-4 w-4" /> Browse documents
             </Link>

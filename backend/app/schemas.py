@@ -5,7 +5,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-
 # ---------------------------------------------------------------------------
 # Auth
 # ---------------------------------------------------------------------------
@@ -313,6 +312,60 @@ class SearchResponse(BaseModel):
     mode: str
     items: list[SearchHit]
     total: int
+
+
+class SalesCurrencyBreakdown(BaseModel):
+    currency: str
+    invoice_count: int
+    total: float
+
+
+class SalesSummary(BaseModel):
+    invoice_count: int
+    total: float
+    average_invoice: float
+    supplier_count: int
+    approved_count: int
+    pending_count: int
+    dated_count: int
+    undated_count: int
+    missing_total_count: int
+    excluded_duplicates: int
+
+
+class SalesPeriod(BaseModel):
+    period: str
+    label: str
+    total: float
+    invoice_count: int
+    approved_total: float
+    approved_count: int
+
+
+class SalesSupplier(BaseModel):
+    supplier_name: str
+    total: float
+    invoice_count: int
+
+
+class SalesStatus(BaseModel):
+    status: str
+    count: int
+    total: float
+
+
+class SalesAnalytics(BaseModel):
+    currency: str
+    months: int
+    years: int
+    period_start: str
+    period_end: str
+    currencies: list[SalesCurrencyBreakdown]
+    summary: SalesSummary
+    monthly: list[SalesPeriod]
+    yearly: list[SalesPeriod]
+    top_suppliers: list[SalesSupplier]
+    statuses: list[SalesStatus]
 
 
 class DashboardStats(BaseModel):

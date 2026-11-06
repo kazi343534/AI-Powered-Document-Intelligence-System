@@ -9,7 +9,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
-from .api import auth, documents, findings, invoices, reconciliations, search_api, system
+from .api import (
+    analytics,
+    auth,
+    documents,
+    findings,
+    invoices,
+    reconciliations,
+    search_api,
+    system,
+)
 from .config import get_settings
 from .database import SessionLocal, init_db, seed_db
 from .storage import get_storage
@@ -104,6 +113,7 @@ def root_health_ready() -> dict:
 
 
 app.include_router(auth.router, prefix=settings.api_prefix)
+app.include_router(analytics.router, prefix=settings.api_prefix)
 app.include_router(documents.router, prefix=settings.api_prefix)
 app.include_router(findings.router, prefix=settings.api_prefix)
 app.include_router(invoices.router, prefix=settings.api_prefix)

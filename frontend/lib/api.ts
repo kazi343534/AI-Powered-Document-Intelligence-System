@@ -14,6 +14,7 @@ import type {
   Finding,
   Invoice,
   Reconciliation,
+  SalesAnalytics,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -215,6 +216,19 @@ export function searchDocuments(params: {
 
 export function getDashboard(): Promise<DashboardStats> {
   return apiRequest<DashboardStats>("/dashboard/stats");
+}
+
+export function getSalesAnalytics(params: {
+  currency?: string;
+  months?: number;
+  years?: number;
+} = {}): Promise<SalesAnalytics> {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== "") search.set(key, String(value));
+  });
+  const suffix = search.toString();
+  return apiRequest<SalesAnalytics>(`/analytics/sales${suffix ? `?${suffix}` : ""}`);
 }
 
 export function listJobs(status?: string): Promise<Job[]> {
