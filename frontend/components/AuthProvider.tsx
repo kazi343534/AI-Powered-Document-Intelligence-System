@@ -8,7 +8,7 @@ import {
   useMemo,
   useState,
 } from "react";
-import { ApiError, login as apiLogin, logout as apiLogout, me } from "@/lib/api";
+import { ApiError, login as apiLogin, logout as apiLogout, me, setToken } from "@/lib/api";
 import type { User } from "@/lib/types";
 
 interface AuthContextValue {
@@ -31,6 +31,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(current);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
+        setToken(null);
         setUser(null);
       }
     } finally {
@@ -43,7 +44,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refresh]);
 
   useEffect(() => {
-    const onUnauthorized = () => setUser(null);
+    const onUnauthorized = () => {
+      setToken(null);
+      setUser(null);
+    };
     window.addEventListener("docintel:unauthorized", onUnauthorized);
     return () => window.removeEventListener("docintel:unauthorized", onUnauthorized);
   }, []);

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from contextlib import asynccontextmanager
 
@@ -32,17 +33,41 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _running_on_render() -> bool:
+    return os.environ.get("RENDER", "").strip().lower() in {"1", "true", "yes"}
+
+
+def _inline_worker_enabled() -> bool:
+    if settings.auto_worker:
+        return True
+    # Render sets RENDER=true on every service. Start the in-process worker
+    # automatically there so uploads are processed even when AUTO_WORKER is
+    # missing from the dashboard environment.
+    return _running_on_render()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
     seed_db()
+    if _running_on_render():
+        if settings.is_sqlite:
+            logger.warning(
+                "running on Render with SQLite: data will not persist across deploys; "
+                "set DATABASE_URL to a managed Postgres"
+            )
+        if settings.storage_backend == "local":
+            logger.warning(
+                "running on Render with local storage: uploads will not persist across "
+                "deploys; set STORAGE_BACKEND=supabase"
+            )
     try:
         get_storage()
     except Exception as exc:
         logger.warning("storage initialization warning: %s", exc)
     worker = None
     thread = None
-    if settings.auto_worker:
+    if _inline_worker_enabled():
         worker, thread = start_background_worker()
         logger.info("inline background worker started")
     yield

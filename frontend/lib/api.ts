@@ -63,6 +63,34 @@ async function parseError(response: Response): Promise<string> {
   }
 }
 
+const RETRYABLE_STATUS = new Set([502, 503, 504]);
+
+async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+  const method = (init.method || "GET").toUpperCase();
+  const canRetry = method === "GET" || method === "HEAD";
+  const attempts = canRetry ? 3 : 1;
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const response = await fetch(url, init);
+      if (
+        canRetry &&
+        RETRYABLE_STATUS.has(response.status) &&
+        attempt < attempts - 1
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 1500 * (attempt + 1)));
+        continue;
+      }
+      return response;
+    } catch (error) {
+      lastError = error;
+      if (!canRetry || attempt === attempts - 1) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 1500 * (attempt + 1)));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Request failed");
+}
+
 export async function apiRequest<T>(
   path: string,
   options: RequestInit = {},
@@ -74,7 +102,7 @@ export async function apiRequest<T>(
   if (options.body && !(options.body instanceof FormData)) {
     headers["Content-Type"] = "application/json";
   }
-  const response = await fetch(`${BASE}${path}`, {
+  const response = await fetchWithRetry(`${BASE}${path}`, {
     ...options,
     headers,
     credentials: "include",
@@ -82,6 +110,8 @@ export async function apiRequest<T>(
   });
   if (!response.ok) {
     if (response.status === 401 && typeof window !== "undefined") {
+      // Drop a stale/invalid token so the app can fall back to a clean login.
+      setToken(null);
       window.dispatchEvent(new Event("docintel:unauthorized"));
     }
     const detail = await parseError(response);
