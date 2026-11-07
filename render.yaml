@@ -36,6 +36,12 @@ services:
       # Switch to "fastembed" on a larger plan for semantic search embeddings.
       - key: EMBEDDING_PROVIDER
         value: hash
+      # RapidOCR peaks near 400 MB and OOMs the free 512 MB instance; the
+      # bundled tesserocr engine uses ~90 MB for printed invoices.
+      - key: OCR_ENGINE
+        value: tesserocr
+      - key: WORKER_CONCURRENCY
+        value: "1"
 
   - type: web
     name: docintel-web

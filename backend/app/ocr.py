@@ -36,6 +36,7 @@ def detect_ocr_engine() -> str:
     requested = settings.ocr_engine.lower()
     if requested == "none":
         return "none"
+
     if requested in {"rapidocr", "auto"}:
         try:
             import rapidocr_onnxruntime  # noqa: F401
@@ -44,8 +45,20 @@ def detect_ocr_engine() -> str:
         except Exception:  # pragma: no cover - optional dependency
             if requested == "rapidocr":
                 raise OCRUnavailableError(
-                    "RapidOCR is not installed. Run `uv sync` or set OCR_ENGINE=tesseract."
+                    "RapidOCR is not installed. Run `uv sync` or set OCR_ENGINE=tesserocr."
                 )
+
+    if requested in {"tesserocr", "auto"}:
+        try:
+            import tesserocr  # noqa: F401
+        except Exception as exc:  # pragma: no cover - optional dependency
+            if requested == "tesserocr":
+                raise OCRUnavailableError(
+                    "tesserocr is not installed. Run `uv sync` or install Tesseract."
+                ) from exc
+        else:
+            return "tesserocr"
+
     if requested in {"tesseract", "auto"}:
         try:
             import pytesseract
@@ -59,7 +72,20 @@ def detect_ocr_engine() -> str:
                 raise OCRUnavailableError(
                     "Tesseract is not installed. Install it with `brew install tesseract`."
                 )
+
+    if requested not in {"auto", "rapidocr", "tesserocr", "tesseract"}:
+        raise OCRUnavailableError(f"Unknown OCR_ENGINE: {requested}")
     return "none"
+
+
+def _tessdata_dir() -> Path | None:
+    """Directory containing eng.traineddata (bundled by default)."""
+    settings = get_settings()
+    if settings.tessdata_prefix:
+        path = Path(settings.tessdata_prefix).expanduser()
+        return path if path.is_dir() else None
+    bundled = Path(__file__).resolve().parent / "tessdata"
+    return bundled if bundled.is_dir() else None
 
 
 @lru_cache
@@ -139,14 +165,44 @@ def _ocr_tesseract(image: Image.Image) -> OCRResult:
     return OCRResult(" ".join(words), confidence, "tesseract")
 
 
+def _ocr_tesserocr(image: Image.Image) -> OCRResult:
+    import tesserocr
+
+    processed = preprocess_image(image)
+    kwargs: dict = {
+        "lang": "eng",
+        "oem": tesserocr.OEM.LSTM_ONLY,
+        "psm": tesserocr.PSM.SINGLE_BLOCK,
+    }
+    tessdata = _tessdata_dir()
+    if tessdata is not None:
+        kwargs["path"] = str(tessdata)
+    try:
+        api = tesserocr.PyTessBaseAPI(**kwargs)
+    except Exception as exc:
+        raise OCRUnavailableError(f"Tesseract could not start: {exc}") from exc
+    try:
+        api.SetImage(processed)
+        text = (api.GetUTF8Text() or "").strip()
+        try:
+            confidence = max(0.0, min(1.0, float(api.MeanTextConf()) / 100.0))
+        except Exception:
+            confidence = 0.0
+    finally:
+        api.End()
+    return OCRResult(text, confidence, "tesserocr")
+
+
 def ocr_image(image: Image.Image) -> OCRResult:
     engine = detect_ocr_engine()
     if engine == "rapidocr":
         return _ocr_rapidocr(image)
+    if engine == "tesserocr":
+        return _ocr_tesserocr(image)
     if engine == "tesseract":
         return _ocr_tesseract(image)
     raise OCRUnavailableError(
-        "No OCR engine is available. Install dependencies or set OCR_ENGINE=tesseract."
+        "No OCR engine is available. Install dependencies or set OCR_ENGINE=tesserocr."
     )
 
 

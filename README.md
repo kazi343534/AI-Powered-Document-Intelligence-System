@@ -11,7 +11,7 @@ extraction + **Next.js 15** frontend.
 
 ```
 upload → validate + SHA-256 dedupe → store → background worker
-  → parse / OCR (RapidOCR) → page grouping
+  → parse / OCR (RapidOCR locally, low-memory Tesseract on Render) → page grouping
   → deterministic + Groq extraction (evidence quotes, null-when-absent)
   → validation V001–V017 + duplicates + PDF↔Excel reconciliation
   → hybrid keyword + vector search → review / correct / approve
@@ -366,6 +366,10 @@ The repository includes `render.yaml`, which defines two free web services:
 3.12 (the project supports `>=3.12,<3.14`). The blueprint uses the `hash`
 embedding provider to fit Render's free 512 MB instance; switch
 `EMBEDDING_PROVIDER` to `fastembed` on a larger plan for model embeddings.
+For the same reason it uses the bundled `tesserocr` engine (~90 MB peak)
+instead of RapidOCR (~400 MB peak), and a single worker
+(`WORKER_CONCURRENCY=1`). Set `OCR_ENGINE=rapidocr` on a larger plan if you
+prefer RapidOCR's recognition quality.
 
 ## Tests
 

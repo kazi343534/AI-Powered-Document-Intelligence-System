@@ -34,8 +34,11 @@ class Settings(BaseSettings):
     groq_base_url: str = "https://api.groq.com/openai/v1"
     llm_timeout_seconds: int = 90
 
-    ocr_engine: str = "auto"  # auto | rapidocr | tesseract | none
+    ocr_engine: str = "auto"  # auto | rapidocr | tesserocr | tesseract | none
     tesseract_cmd: str = ""
+    # Directory containing eng.traineddata for tesserocr. Empty uses the
+    # bundled backend/app/tessdata directory.
+    tessdata_prefix: str = ""
 
     embedding_provider: str = "auto"  # auto | fastembed | hash
     embedding_model: str = "BAAI/bge-small-en-v1.5"
@@ -66,6 +69,11 @@ class Settings(BaseSettings):
                 self.embedding_provider = "hash"
             if "WORKER_CONCURRENCY" not in os.environ:
                 self.worker_concurrency = 1
+            # RapidOCR (ONNX) peaks near 400 MB and OOMs the 512 MB free
+            # instance. Tesseract uses ~90 MB and handles printed invoices
+            # well, so prefer it on Render unless OCR_ENGINE is explicit.
+            if "OCR_ENGINE" not in os.environ and self.ocr_engine == "auto":
+                self.ocr_engine = "tesserocr"
         return self
 
     @field_validator("database_url")
