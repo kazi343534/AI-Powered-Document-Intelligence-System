@@ -457,6 +457,162 @@ class TestReconciliationDismissal:
         assert approved.status_code == 200, approved.text
         assert approved.json()["status"] == "completed"
 
+    def test_resolving_linked_findings_dismisses_reconciliation(
+        self, client, auth_headers, make_pdf, process_jobs, db
+    ):
+        """Dismissing the findings for a mismatch must also clear the mismatch.
+
+        Reviewers can work from either the Findings or Reconciliation tab; the
+        same difference is stored in both places and must not block approval
+        twice.
+        """
+        from app.models import Finding, Reconciliation
+
+        with open(make_pdf, "rb") as handle:
+            created = client.post(
+                "/api/v1/documents",
+                files={"files": ("invoice.pdf", handle, "application/pdf")},
+                headers=auth_headers,
+            )
+        doc_id = created.json()["documents"][0]["id"]
+        process_jobs(doc_id)
+
+        detail = client.get(f"/api/v1/documents/{doc_id}", headers=auth_headers).json()
+        invoice_id = detail["invoices"][0]["id"]
+        for finding in detail.get("findings") or []:
+            response = client.patch(
+                f"/api/v1/findings/{finding['id']}",
+                json={"status": "resolved"},
+                headers=auth_headers,
+            )
+            assert response.status_code == 200, response.text
+
+        reconciliation = Reconciliation(
+            invoice_id=invoice_id,
+            match_type="pdf_sheet",
+            confidence=0.95,
+            diffs=[
+                {
+                    "field": "total",
+                    "invoice_value": "150.00",
+                    "sheet_value": "999.00",
+                    "severity": "error",
+                }
+            ],
+            status="mismatch",
+        )
+        db.add(reconciliation)
+        db.flush()
+        finding = Finding(
+            document_id=doc_id,
+            invoice_id=invoice_id,
+            rule_code="V013",
+            severity="error",
+            field_path="total",
+            message="Total differs between the PDF invoice and the spreadsheet ledger",
+            expected="150.00",
+            actual="999.00",
+        )
+        db.add(finding)
+        db.commit()
+        reconciliation_id = reconciliation.id
+
+        blocked = client.post(
+            f"/api/v1/documents/{doc_id}/approve",
+            json={"note": "blocked by mismatch"},
+            headers=auth_headers,
+        )
+        assert blocked.status_code == 409, blocked.text
+        assert "1 reconciliation mismatch" in blocked.text
+
+        resolved = client.patch(
+            f"/api/v1/findings/{finding.id}",
+            json={"status": "dismissed", "note": "known test data difference"},
+            headers=auth_headers,
+        )
+        assert resolved.status_code == 200, resolved.text
+
+        recs = client.get(
+            "/api/v1/reconciliations",
+            params={"invoice_id": invoice_id},
+            headers=auth_headers,
+        ).json()
+        assert any(
+            item["id"] == reconciliation_id and item["status"] == "dismissed"
+            for item in recs
+        )
+
+        approved = client.post(
+            f"/api/v1/documents/{doc_id}/approve",
+            json={"note": "approved after findings resolved"},
+            headers=auth_headers,
+        )
+        assert approved.status_code == 200, approved.text
+        assert approved.json()["status"] == "completed"
+
+    def test_dismissing_reconciliation_dismisses_linked_findings(
+        self, client, auth_headers, make_pdf, process_jobs, db
+    ):
+        from app.models import Finding, Reconciliation
+
+        with open(make_pdf, "rb") as handle:
+            created = client.post(
+                "/api/v1/documents",
+                files={"files": ("invoice.pdf", handle, "application/pdf")},
+                headers=auth_headers,
+            )
+        doc_id = created.json()["documents"][0]["id"]
+        process_jobs(doc_id)
+
+        detail = client.get(f"/api/v1/documents/{doc_id}", headers=auth_headers).json()
+        invoice_id = detail["invoices"][0]["id"]
+        reconciliation = Reconciliation(
+            invoice_id=invoice_id,
+            match_type="pdf_sheet",
+            confidence=0.95,
+            diffs=[
+                {
+                    "field": "tax",
+                    "invoice_value": "30.00",
+                    "sheet_value": "12.00",
+                    "severity": "warning",
+                }
+            ],
+            status="mismatch",
+        )
+        db.add(reconciliation)
+        db.flush()
+        finding = Finding(
+            document_id=doc_id,
+            invoice_id=invoice_id,
+            rule_code="V013",
+            severity="warning",
+            field_path="tax",
+            message="Tax differs between the PDF invoice and the spreadsheet ledger",
+            expected="30.00",
+            actual="12.00",
+        )
+        db.add(finding)
+        db.commit()
+        reconciliation_id = reconciliation.id
+
+        updated = client.patch(
+            f"/api/v1/reconciliations/{reconciliation_id}",
+            json={"status": "dismissed", "note": "rounding difference"},
+            headers=auth_headers,
+        )
+        assert updated.status_code == 200, updated.text
+
+        findings = client.get(
+            "/api/v1/findings",
+            params={"invoice_id": invoice_id},
+            headers=auth_headers,
+        ).json()
+        assert any(
+            item["id"] == finding.id and item["status"] == "dismissed"
+            for item in findings
+        )
+
     def test_other_document_findings_do_not_block_invoice_approval(
         self, client, auth_headers, make_pdf, process_jobs, db
     ):

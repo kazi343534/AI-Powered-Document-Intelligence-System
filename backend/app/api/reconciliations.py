@@ -7,6 +7,10 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import Invoice, Reconciliation, User
 from ..presenters import reconciliation_out
+from ..reconciliation_sync import (
+    auto_dismiss_acknowledged_reconciliations,
+    dismiss_linked_findings,
+)
 from ..schemas import ReconciliationOut, ReconciliationUpdateRequest
 from .deps import client_ip, get_current_user, record_audit, require_roles
 
@@ -66,6 +70,38 @@ def update_reconciliation(
         raise HTTPException(status_code=404, detail="Reconciliation not found")
     previous_status = item.status
     item.status = payload.status
+    # The same difference is displayed in the Findings tab as V013/V010
+    # findings; resolving it here must resolve those too.
+    linked = dismiss_linked_findings(db, item, user_id=user.id, note=payload.note)
+    for finding in linked:
+        record_audit(
+            db,
+            user,
+            "finding.update",
+            "finding",
+            finding.id,
+            {
+                "status": "dismissed",
+                "note": payload.note,
+                "source": "reconciliation.update",
+            },
+            client_ip(request),
+        )
+    for other in auto_dismiss_acknowledged_reconciliations(db, item.invoice_id):
+        record_audit(
+            db,
+            user,
+            "reconciliation.update",
+            "reconciliation",
+            other.id,
+            {
+                "status": "dismissed",
+                "previous_status": "mismatch",
+                "note": payload.note,
+                "source": "reconciliation.update",
+            },
+            client_ip(request),
+        )
     record_audit(
         db,
         user,
@@ -76,6 +112,7 @@ def update_reconciliation(
             "status": payload.status,
             "previous_status": previous_status,
             "note": payload.note,
+            "linked_findings": len(linked),
         },
         client_ip(request),
     )

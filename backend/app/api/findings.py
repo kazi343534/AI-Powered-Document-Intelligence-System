@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import Finding, User
 from ..presenters import finding_out
+from ..reconciliation_sync import auto_dismiss_acknowledged_reconciliations
 from ..schemas import FindingOut, FindingUpdateRequest
 from .deps import client_ip, get_current_user, record_audit, require_roles
 
@@ -51,7 +52,7 @@ def update_finding(
     finding.status = payload.status
     finding.resolution_note = payload.note
     finding.resolved_by = user.id
-    finding.resolved_at = datetime.now(timezone.utc)
+    finding.resolved_at = datetime.now(UTC)
     record_audit(
         db,
         user,
@@ -61,5 +62,23 @@ def update_finding(
         {"status": payload.status, "note": payload.note},
         client_ip(request),
     )
+    # Reconciliation diffs are mirrored as findings. Once every linked
+    # finding is resolved/dismissed, the mismatch is acknowledged too and
+    # must no longer block approval.
+    for reconciliation in auto_dismiss_acknowledged_reconciliations(db, finding.invoice_id):
+        record_audit(
+            db,
+            user,
+            "reconciliation.update",
+            "reconciliation",
+            reconciliation.id,
+            {
+                "status": "dismissed",
+                "previous_status": "mismatch",
+                "note": "All linked findings resolved",
+                "source": "finding.update",
+            },
+            client_ip(request),
+        )
     db.commit()
     return finding_out(finding)
