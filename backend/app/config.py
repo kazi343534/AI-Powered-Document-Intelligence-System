@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -54,6 +55,18 @@ class Settings(BaseSettings):
 
     # Optional: run an in-process worker with the API (single-service demo).
     auto_worker: bool = False
+
+    @model_validator(mode="after")
+    def _render_free_tier_defaults(self) -> "Settings":
+        # Render's free instance has ~512 MB of RAM. Loading the FastEmbed
+        # model or running two workers can push it into OOM restarts, so use
+        # the lightweight defaults there unless explicitly configured.
+        if os.environ.get("RENDER", "").strip().lower() in {"1", "true", "yes"}:
+            if "EMBEDDING_PROVIDER" not in os.environ and self.embedding_provider == "auto":
+                self.embedding_provider = "hash"
+            if "WORKER_CONCURRENCY" not in os.environ:
+                self.worker_concurrency = 1
+        return self
 
     @field_validator("database_url")
     @classmethod
