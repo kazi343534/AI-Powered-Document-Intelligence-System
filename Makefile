@@ -4,7 +4,7 @@
 # Frontend: Node + npm
 
 .PHONY: help backend-install backend-init backend-api backend-worker backend-test \
-        frontend-install frontend-dev frontend-build frontend-typecheck \
+        backend-lint frontend-install frontend-dev frontend-build frontend-typecheck \
         eval-fixtures eval-run clean
 
 help:  ## Show this help
@@ -18,7 +18,7 @@ backend-install:  ## Install backend dependencies
 	cd backend && uv sync --extra dev
 
 backend-init:  ## Init dev DB (SQLite) and seed demo user
-	cd backend && uv run python -m cli init-db
+	cd backend && uv run python -m app.cli init-db
 
 backend-api:  ## Start FastAPI API on :8000
 	cd backend && uv run uvicorn app.main:app --reload --port 8000
