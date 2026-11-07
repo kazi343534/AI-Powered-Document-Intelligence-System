@@ -29,6 +29,22 @@ def test_deterministic_line_items():
     assert data.line_items[0].amount == "125.00"
 
 
+def test_deterministic_line_items_with_ocr_table_artifacts():
+    # Tesseract often keeps table borders/bullets at the start of a row.
+    pages = [
+        (
+            1,
+            "| Palette Shrink Wrap (Rolls) 15 18.50 277.50\n"
+            "- Delivery Surcharge 1 95.00 95.00\n",
+        )
+    ]
+    data = deterministic_extract(pages)
+    descriptions = [item.description for item in data.line_items]
+    assert descriptions == ["Palette Shrink Wrap (Rolls)", "Delivery Surcharge"]
+    assert data.line_items[0].amount == "277.50"
+    assert data.line_items[1].amount == "95.00"
+
+
 def test_extract_invoice_never_invents_missing():
     pages = [(1, "just some unrelated text\n")]
     outcome = extract_invoice(pages)

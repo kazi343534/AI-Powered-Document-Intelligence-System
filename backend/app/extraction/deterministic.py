@@ -507,8 +507,10 @@ def _parse_line_items(text: str) -> list[ExtractionLineItem]:
         )
 
     # Layout A: one row per line (description, qty, unit price, amount).
+    # OCR often leaves table borders or bullets ("|", "-", "_") at the start
+    # of a row, so allow (and drop) a leading punctuation run.
     single_re = re.compile(
-        r"^(?P<desc>[A-Za-z][A-Za-z0-9 ,&()/._'#-]{2,80}?)\s+"
+        r"^(?:[^A-Za-z0-9]+)?(?P<desc>[A-Za-z][A-Za-z0-9 ,&()/._'#-]{2,80}?)\s+"
         r"(?P<qty>-?\d{1,5}(?:[.,]\d{1,2})?)\s+"
         r"(?P<unit>\d{1,3}(?:[,\s]\d{3})*(?:[.,]\d{1,4})?)\s+"
         r"(?P<amount>-?\d{1,3}(?:[,\s]\d{3})*(?:[.,]\d{1,4})?)\s*$"
