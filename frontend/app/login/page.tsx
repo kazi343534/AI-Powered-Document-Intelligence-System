@@ -29,6 +29,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState(DEMO_PASSWORD);
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [slow, setSlow] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -39,12 +40,16 @@ export default function LoginPage() {
     event.preventDefault();
     setError(null);
     setSubmitting(true);
+    setSlow(false);
+    const slowTimer = setTimeout(() => setSlow(true), 4000);
     try {
       await login(email.trim(), password);
       router.replace("/dashboard");
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "Could not sign in. Please try again.");
       setSubmitting(false);
+    } finally {
+      clearTimeout(slowTimer);
     }
   }
 
@@ -138,6 +143,12 @@ export default function LoginPage() {
                 </>
               )}
             </button>
+
+            {submitting && slow ? (
+              <p className="text-center text-xs leading-5 text-slate-500">
+                Waking up the server — on the free plan this can take up to a minute.
+              </p>
+            ) : null}
           </form>
 
           <div className="mt-6 rounded-xl border border-slate-200 bg-white/80 p-3.5">

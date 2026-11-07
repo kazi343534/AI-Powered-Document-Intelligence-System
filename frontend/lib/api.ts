@@ -64,28 +64,41 @@ async function parseError(response: Response): Promise<string> {
 }
 
 const RETRYABLE_STATUS = new Set([502, 503, 504]);
+// Render's free tier spins the API down after ~15 min idle. Waking it up can
+// take 30-60 seconds, during which the Next.js proxy answers with a 502.
+const MAX_RETRY_ATTEMPTS = 12;
+const RETRY_DELAY_MS = 5000;
 
-async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableRequest(method: string, path: string): boolean {
+  if (method === "GET" || method === "HEAD") return true;
+  // Login is safe to retry and is usually the first call after a cold start.
+  return path === "/auth/login";
+}
+
+async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  path: string,
+): Promise<Response> {
   const method = (init.method || "GET").toUpperCase();
-  const canRetry = method === "GET" || method === "HEAD";
-  const attempts = canRetry ? 3 : 1;
+  const attempts = isRetryableRequest(method, path) ? MAX_RETRY_ATTEMPTS : 1;
   let lastError: unknown = null;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
       const response = await fetch(url, init);
-      if (
-        canRetry &&
-        RETRYABLE_STATUS.has(response.status) &&
-        attempt < attempts - 1
-      ) {
-        await new Promise((resolve) => setTimeout(resolve, 1500 * (attempt + 1)));
+      if (RETRYABLE_STATUS.has(response.status) && attempt < attempts - 1) {
+        await delay(RETRY_DELAY_MS);
         continue;
       }
       return response;
     } catch (error) {
       lastError = error;
-      if (!canRetry || attempt === attempts - 1) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 1500 * (attempt + 1)));
+      if (attempt === attempts - 1) throw error;
+      await delay(RETRY_DELAY_MS);
     }
   }
   throw lastError instanceof Error ? lastError : new Error("Request failed");
@@ -102,12 +115,16 @@ export async function apiRequest<T>(
   if (options.body && !(options.body instanceof FormData)) {
     headers["Content-Type"] = "application/json";
   }
-  const response = await fetchWithRetry(`${BASE}${path}`, {
-    ...options,
-    headers,
-    credentials: "include",
-    cache: "no-store",
-  });
+  const response = await fetchWithRetry(
+    `${BASE}${path}`,
+    {
+      ...options,
+      headers,
+      credentials: "include",
+      cache: "no-store",
+    },
+    path,
+  );
   if (!response.ok) {
     if (response.status === 401 && typeof window !== "undefined") {
       // Drop a stale/invalid token so the app can fall back to a clean login.
