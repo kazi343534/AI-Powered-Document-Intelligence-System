@@ -59,6 +59,81 @@ def test_xlsx_parsing(tmp_path):
     assert row["normalized"]["total"] == "250"
 
 
+def test_hybrid_invoice_and_line_item_sheet_creates_parent_rows(tmp_path):
+    import openpyxl
+
+    path = tmp_path / "hybrid.xlsx"
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "March"
+    sheet.append(
+        [
+            "Invoice Number",
+            "Invoice Date",
+            "Supplier",
+            "Customer",
+            "Currency",
+            "Description",
+            "Qty",
+            "Unit Price",
+            "Amount",
+            "Subtotal",
+            "Tax",
+            "Total",
+        ]
+    )
+    sheet.append(
+        [
+            "INV-H-1",
+            "2025-03-05",
+            "Orchid Tech",
+            "Stark Industries",
+            "USD",
+            "Laptop stand",
+            2,
+            30,
+            60,
+            80,
+            8,
+            88,
+        ]
+    )
+    sheet.append(
+        [
+            "INV-H-1",
+            "2025-03-05",
+            "Orchid Tech",
+            "Stark Industries",
+            "USD",
+            "USB hub",
+            1,
+            20,
+            20,
+            80,
+            8,
+            88,
+        ]
+    )
+    workbook.save(str(path))
+
+    sheets = parse_spreadsheet(path, ".xlsx")
+    assert len(sheets) == 1
+    parsed = sheets[0]
+    assert parsed.kind == SHEET_INVOICE_LEDGER
+    assert len(parsed.rows) == 1
+    assert len(parsed.line_items) == 2
+    parent = parsed.rows[0]["normalized"]
+    assert parent["invoice_number"] == "INV-H-1"
+    assert parent["total"] == "88"
+    assert parent["line_item_count"] == 2
+    assert [item["description"] for item in parent["line_items"]] == [
+        "Laptop stand",
+        "USB hub",
+    ]
+    assert parsed.rows[0]["warnings"] == []
+    assert all(item["normalized"]["linked"] for item in parsed.line_items)
+
+
 def test_unsupported_type_raises(tmp_path):
     path = tmp_path / "notes.txt"
     path.write_text("hello")

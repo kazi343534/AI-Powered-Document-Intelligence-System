@@ -1,6 +1,8 @@
 """Tests for deterministic extraction and evidence verification."""
 
-from app.extraction.deterministic import deterministic_extract
+import pytest
+
+from app.extraction.deterministic import _amount_from_line, deterministic_extract
 from app.extraction.service import extract_invoice
 
 
@@ -17,6 +19,46 @@ def test_deterministic_currency_symbol():
     pages = [(1, "INVOICE\nInvoice No: INV-X\nTotal £1,650.00\n")]
     data = deterministic_extract(pages)
     assert data.currency.value == "GBP"
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("Total: 1.190,00", "1190.00"),
+        ("Subtotal: 1.000,00", "1000.00"),
+        ("Tax (19%): 190,00", "190.00"),
+        ("Total: 1.250,50 €", "1250.50"),
+        ("Total: 450,00 €", "450.00"),
+        ("Total: 1,250.50", "1250.50"),
+        ("Total: 12,000.00", "12000.00"),
+    ],
+)
+def test_amount_from_line_handles_european_format(line, expected):
+    amount = _amount_from_line(line)
+    assert amount is not None
+    assert str(amount) == expected
+
+
+def test_deterministic_european_invoice():
+    text = "\n".join(
+        [
+            "Blue Harbor Logistics",
+            "Invoice No: INV-7007",
+            "Invoice Date: 15 March 2025",
+            "From: Blue Harbor Logistics",
+            "Bill To: Umbrella Holdings",
+            "Currency: EUR",
+            "Subtotal: 1.000,00",
+            "Tax (19%): 190,00",
+            "Total: 1.190,00",
+        ]
+    )
+    data = deterministic_extract([(1, text)])
+    assert data.invoice_number.value == "INV-7007"
+    assert data.currency.value == "EUR"
+    assert data.subtotal.value == "1000.00"
+    assert data.tax.value == "190.00"
+    assert data.total.value == "1190.00"
 
 
 def test_deterministic_line_items():

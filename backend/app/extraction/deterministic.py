@@ -18,8 +18,22 @@ from ..parsers.grouping import (
     detect_supplier,
 )
 
+_CURRENCY_CODE = r"(?:USD|EUR|GBP|INR|JPY|CAD|AUD|CHF|CNY)"
+_CURRENCY_SYMBOL = r"[£$€₹¥]"
+# A single number token in US (1,234.56) or European (1.234,56) grouping.
+# The trailing lookahead prevents a grouped match from stopping mid-number,
+# e.g. treating "1.2345" as "1.234" followed by "5".
+_NUMBER_RE = (
+    r"(?:"
+    r"\d{1,3}(?:\.\d{3})+(?:,\d{1,4})?"
+    r"|\d{1,3}(?:,\d{3})+(?:\.\d{1,4})?"
+    r"|\d{1,3}(?:[ \u00a0]\d{3})+(?:[.,]\d{1,4})?"
+    r"|\d+(?:[.,]\d{1,4})?"
+    r")(?!\d|[.,]\d)"
+)
 MONEY_RE = re.compile(
-    r"(?<![\w])(?:[£$€₹¥]\s*)?-?\(?\d{1,3}(?:[,\s]\d{3})*(?:\.\d{1,4})?\)?(?:\s*(?:USD|EUR|GBP|INR|JPY|CAD|AUD|CHF|CNY))?",
+    rf"(?<![\w])(?:{_CURRENCY_SYMBOL}\s*)?-?\(?{_NUMBER_RE}\)?"
+    rf"(?:\s*(?:{_CURRENCY_SYMBOL}|{_CURRENCY_CODE}))?",
     re.IGNORECASE,
 )
 DATE_RE = re.compile(
@@ -213,13 +227,12 @@ def _strip_percentages(line: str) -> str:
 
 
 def _amounts_in(line: str) -> list[Decimal]:
+    # Remove dates first so fragments such as "2026", "10", and "01" in
+    # "2026-10-01" cannot be mistaken for monetary values.
+    cleaned = DATE_RE.sub(" ", _strip_percentages(line))
     amounts: list[Decimal] = []
-    for match in MONEY_RE.finditer(_strip_percentages(line)):
+    for match in MONEY_RE.finditer(cleaned):
         raw = match.group(0)
-        # Skip fragments of dates such as 2026-10-01.
-        after = line[match.end() : match.end() + 1]
-        if after in {"-", "/", "."}:
-            continue
         parsed = parse_decimal(raw)
         if parsed is None:
             continue
@@ -240,13 +253,19 @@ def _amount_from_line(line: str | None) -> Decimal | None:
 def _money_only(line: str) -> bool:
     cleaned = _strip_percentages(normalize_whitespace(line)).strip()
     cleaned = re.sub(
-        r"^(?:USD|EUR|GBP|INR|JPY|CAD|AUD|CHF|CNY)\s*", "", cleaned, flags=re.IGNORECASE
+        rf"^(?:{_CURRENCY_CODE}|{_CURRENCY_SYMBOL})\s*",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
     )
     cleaned = re.sub(
-        r"\s*(?:USD|EUR|GBP|INR|JPY|CAD|AUD|CHF|CNY)$", "", cleaned, flags=re.IGNORECASE
+        rf"\s*(?:{_CURRENCY_CODE}|{_CURRENCY_SYMBOL})$",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
     )
     cleaned = cleaned.strip("() []")
-    return bool(re.fullmatch(r"-?\d{1,3}(?:[,\s]\d{3})*(?:\.\d{1,4})?", cleaned))
+    return bool(re.fullmatch(rf"-?\(?{_NUMBER_RE}\)?", cleaned))
 
 
 def _currency_fragment(line: str) -> bool:

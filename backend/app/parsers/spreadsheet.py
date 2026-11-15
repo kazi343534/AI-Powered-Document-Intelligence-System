@@ -148,6 +148,39 @@ LINE_ITEM_STRONG_HEADERS = {
     "calculated line total",
 }
 LINE_ITEM_BROAD_HEADERS = {"quantity", "qty", "unit price"}
+INVOICE_IDENTITY_HEADERS = {
+    "invoice number",
+    "invoice no",
+    "expected invoice no",
+    "invoice number pdf",
+    "po number",
+    "po no",
+    "record id",
+}
+INVOICE_AMOUNT_HEADERS = {
+    "subtotal",
+    "sub total",
+    "expected subtotal",
+    "pdf subtotal",
+    "net amount",
+    "tax",
+    "vat",
+    "gst",
+    "hst",
+    "expected tax",
+    "pdf tax",
+    "tax amount",
+    "sales tax",
+    "vat amount",
+    "total",
+    "grand total",
+    "expected total",
+    "pdf total",
+    "total amount",
+    "amount due",
+    "gross",
+    "invoice total",
+}
 
 
 class SpreadsheetError(RuntimeError):
@@ -181,9 +214,15 @@ def classify_sheet(headers: list[Any]) -> str:
     normalized = {normalize_header(header) for header in headers if header not in (None, "")}
     if normalized & RECONCILIATION_HEADERS:
         return SHEET_RECONCILIATION
-    if normalized & LINE_ITEM_STRONG_HEADERS:
-        return SHEET_LINE_ITEMS
-    if len(normalized & LINE_ITEM_BROAD_HEADERS) >= 2:
+    has_line_items = bool(normalized & LINE_ITEM_STRONG_HEADERS) or (
+        len(normalized & LINE_ITEM_BROAD_HEADERS) >= 2
+    )
+    if has_line_items:
+        # Hybrid sheets repeat invoice-level columns (number, totals) on every
+        # detail row. They are invoice ledgers whose rows also carry line items,
+        # not standalone line-item-only sheets.
+        if normalized & INVOICE_IDENTITY_HEADERS and normalized & INVOICE_AMOUNT_HEADERS:
+            return SHEET_INVOICE_LEDGER
         return SHEET_LINE_ITEMS
     return SHEET_INVOICE_LEDGER
 
@@ -241,6 +280,15 @@ def canonical_headers(headers: list[Any]) -> dict[int, str]:
     for index, header in enumerate(normalized):
         canonical = synonym_lookup.get(header)
         if canonical and canonical not in used:
+            mapping[index] = canonical
+            used.add(canonical)
+    # "Amount" is ambiguous. When the sheet also has a Total column it is the
+    # line amount; otherwise it is the invoice total.
+    for index, header in enumerate(normalized):
+        if header != "amount" or index in mapping:
+            continue
+        canonical = "line_total" if "total" in used else "total"
+        if canonical not in used:
             mapping[index] = canonical
             used.add(canonical)
     return mapping
@@ -334,6 +382,12 @@ def _rows_to_sheet(
     header_index, raw_headers, mapping = _find_header_row(rows)
     header_names = _dedupe_headers(raw_headers)
     kind = classify_sheet(raw_headers)
+    normalized_headers = {
+        normalize_header(header) for header in header_names if header
+    }
+    has_line_item_columns = bool(normalized_headers & LINE_ITEM_STRONG_HEADERS) or (
+        len(normalized_headers & LINE_ITEM_BROAD_HEADERS) >= 2
+    )
     parsed = ParsedSheet(
         name=name,
         header_row=header_index + 1,
@@ -349,6 +403,7 @@ def _rows_to_sheet(
         )
         return parsed
 
+    invoice_rows_by_key: dict[str, dict[str, Any]] = {}
     for offset, row in enumerate(rows[header_index + 1 :], start=header_index + 2):
         if not row or not any(cell not in (None, "") for cell in row):
             continue
@@ -411,6 +466,32 @@ def _rows_to_sheet(
             )
         ):
             continue
+        invoice_key = normalized.get("invoice_number_key")
+        if has_line_item_columns:
+            payload = _line_item_payload(normalized)
+            if any(value not in (None, "") for value in payload.values()):
+                line_normalized = dict(normalized)
+                line_normalized["row_type"] = "line_item"
+                line_normalized["parent_invoice_number"] = normalized.get(
+                    "invoice_number"
+                )
+                parsed.line_items.append(
+                    {
+                        "row_number": offset,
+                        "data": raw,
+                        "normalized": line_normalized,
+                        "warnings": list(row_warnings),
+                    }
+                )
+            if invoice_key and invoice_key in invoice_rows_by_key:
+                # Hybrid sheets repeat the invoice columns on every detail row.
+                # Keep one parent invoice record and attach each detail row to it.
+                parent = invoice_rows_by_key[invoice_key]
+                for warning in row_warnings:
+                    if warning not in parent["warnings"]:
+                        parent["warnings"].append(warning)
+                continue
+
         normalized["row_type"] = "invoice"
         if not normalized.get("invoice_number"):
             row_warnings.append("missing invoice number")
@@ -425,6 +506,8 @@ def _rows_to_sheet(
                 "warnings": row_warnings,
             }
         )
+        if invoice_key:
+            invoice_rows_by_key[str(invoice_key)] = parsed.rows[-1]
     return parsed
 
 
@@ -503,8 +586,6 @@ def _link_line_items(sheets: list[ParsedSheet]) -> None:
                 parents.setdefault(str(key), row)
 
     for sheet in sheets:
-        if sheet.kind != SHEET_LINE_ITEMS:
-            continue
         for item in sheet.line_items:
             normalized = item.get("normalized") or {}
             key = normalized.get("invoice_number_key")

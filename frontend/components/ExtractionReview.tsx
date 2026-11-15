@@ -680,7 +680,7 @@ export function ExtractionReview({
         <div className="border-b border-slate-100 px-5 py-4">
           <h2 className="text-sm font-semibold text-slate-900">Validation & reconciliation</h2>
           <p className="mt-0.5 text-xs text-slate-400">
-            Checks V001–V017: required fields, arithmetic, dates, duplicates, cross-document consistency, and confidence.
+            Checks V001–V018: required fields, arithmetic, dates, duplicates, cross-document consistency, confidence, and zero totals.
           </p>
         </div>
         <FindingsList findings={findings} onUpdate={handleFindingUpdate} />

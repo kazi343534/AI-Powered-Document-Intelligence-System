@@ -1,4 +1,4 @@
-"""Tests for validation rules (V001–V017), duplicates and reconciliation."""
+"""Tests for validation rules (V001–V018), duplicates and reconciliation."""
 
 from datetime import date, timedelta
 
@@ -67,3 +67,23 @@ def test_v002_future_date(db):
     data = _build_data(invoice_date=(date.today() + timedelta(days=5)).isoformat())
     result = validate_invoice(db, None, invoice, None, data)
     assert any(i.rule_code == "V002" for i in result.issues)
+
+
+def test_v018_zero_total_blocks_approval(db):
+    invoice = type("Invoice", (), {"id": "inv-8"})()
+    data = _build_data(
+        invoice_number="INV-ZERO",
+        invoice_date=(date.today() - timedelta(days=30)).isoformat(),
+        supplier_name="Blue Harbor Logistics",
+        customer_name="Umbrella Holdings",
+        currency="EUR",
+        subtotal="0.00",
+        tax="0.00",
+        total="0.00",
+    )
+    result = validate_invoice(db, None, invoice, None, data)
+    zero_total = [i for i in result.issues if i.rule_code == "V018"]
+    assert len(zero_total) == 1
+    assert zero_total[0].severity == "error"
+    assert zero_total[0].field_path == "total"
+    assert result.blocking

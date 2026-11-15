@@ -267,6 +267,21 @@ def validate_invoice(
                 invoice_id=invoice.id,
             )
 
+    if total is not None and total == 0:
+        # A zero total is either a genuine zero-value document or, far more
+        # often, a parsing failure (for example "1.190,00" read as "0.00").
+        # Block auto-approval and require a human to confirm the amount.
+        _add(
+            result,
+            "V018",
+            "error",
+            "total",
+            "Invoice total is zero; verify the amount parsed correctly or review "
+            "the document manually",
+            actual=str(total),
+            invoice_id=invoice.id,
+        )
+
     if subtotal is not None and tax is not None and total is not None:
         computed = subtotal + tax
         if abs(computed - total) > MONEY_TOLERANCE:

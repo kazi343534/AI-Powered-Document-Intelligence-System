@@ -477,7 +477,7 @@ docintel/
 │   │   ├── utils.py            # normalization/parsing helpers
 │   │   ├── validation.py       # validation rules and reconciliation drafts
 │   │   └── worker.py           # background worker
-│   ├── tests/                  # 88 deterministic, offline pytest tests
+│   ├── tests/                  # 98 deterministic, offline pytest tests
 │   ├── tests/fixtures/         # committed regression workbook
 │   ├── data/                   # local SQLite DB + uploads (dev only, gitignored)
 │   ├── .env.example            # copy to .env and fill in secrets
@@ -897,9 +897,15 @@ Findings are persisted with `rule_code`, `severity` (`info` / `warning` /
 | `V014` | Spreadsheet-internal duplicate invoice number or `subtotal + tax ≠ total` | error |
 | `V015` | Required-field confidence is below `AUTO_APPROVE_CONFIDENCE` | warning |
 | `V016` | A non-null value's evidence quote could not be verified | warning |
+| `V018` | Invoice total is zero; blocks auto-approval and requires manual review | error |
 
 The per-line-item checks `V006` and `V007` inspect the first 20 line items;
 `V005` sums all extracted line items.
+
+Amounts are parsed in both US (`1,234.56`) and European (`1.234,56`) notation,
+including trailing currency symbols such as `1.250,50 €`. A parsed total of
+exactly zero raises `V018`, so a failed amount extraction cannot auto-approve
+as "Clear".
 
 Rule IDs `V008` (currency ISO check), `V012` (PDF↔PDF conflict as a separate
 finding), and `V017` (prompt-injection detection) are reserved in the product
@@ -1022,6 +1028,13 @@ date, supplier, customer, subtotal, tax, and total.
   `invoice_number`.
 - `RECONCILIATION` (variance/comparison columns) → skipped for top-level
   extraction and never duplicated.
+
+Sheets that repeat invoice-level columns (number, date, supplier, subtotal,
+tax, total) on every row while also carrying description/quantity/unit-price
+columns are treated as hybrid `INVOICE_LEDGER` sheets: one parent invoice row
+is kept per invoice number and each detail row becomes a linked child line
+item. The `Amount` column is interpreted as the line total when the sheet also
+has a `Total` column, and as the invoice total otherwise.
 
 Result on the cross-verification workbook: **14 invoice/PO records** (8 from
 `Master_PO_Ledger` + 6 from `Dirty_Data_Stress_Test`) and **20 child line
@@ -1430,12 +1443,12 @@ Re-run with `GROQ_API_KEY` set in `backend/.env` to measure the Groq path.
 
 ## Tests
 
-The backend suite contains **88 deterministic, offline tests** across 7 test
+The backend suite contains **98 deterministic, offline tests** across 7 test
 modules. No live LLM, network, Supabase, or Tesseract install is required.
 
 ```bash
 cd backend
-uv run pytest tests/ -q      # 88 passed
+uv run pytest tests/ -q      # 98 passed
 uv run ruff check app tests  # lint
 ```
 
@@ -1452,10 +1465,10 @@ npm run build
 | Test module | Tests | Coverage |
 |-------------|-------|----------|
 | `test_utils.py` | 21 | Decimal parsing (plain, integer, negative parentheses, European/thousand separators, currency symbols, empty, garbage), invoice-number normalization, supplier normalization, currency code/symbol/unknown handling, flexible date parsing, constants |
-| `test_parsers.py` | 7 | CSV/XLSX parsing, unsupported types, cross-verification sheet classification and counts (14 invoices + 20 line items), header aliases and unknown currency, dirty-row warnings, line-item parent linking |
-| `test_validation.py` | 7 | V001 required fields, V002 future date, V004 arithmetic mismatch/OK, V005 line-item sum, V009 missing line items, V015 low confidence |
+| `test_parsers.py` | 8 | CSV/XLSX parsing, unsupported types, hybrid invoice+line-item sheets, cross-verification sheet classification and counts (14 invoices + 20 line items), header aliases and unknown currency, dirty-row warnings, line-item parent linking |
+| `test_validation.py` | 8 | V001 required fields, V002 future date, V004 arithmetic mismatch/OK, V005 line-item sum, V009 missing line items, V015 low confidence, V018 zero total blocks approval |
 | `test_grouping.py` | 9 | Single page → one invoice, continuation pages, new invoice numbers, missing numbers, confidence bounds, record headings within/across pages, inline invoice numbers, empty input |
-| `test_extraction.py` | 9 | Core-field extraction, currency symbols, line items, OCR table artifacts (`|`/`-` rows), never inventing missing fields, AI-disabled behavior, evidence quotes, multiline suppliers, image-style auto-approve confidence |
+| `test_extraction.py` | 17 | Core-field extraction, currency symbols, US/EU number formats (`1.190,00`, `1.250,50 €`, `450,00 €`), line items, OCR table artifacts (`|`/`-` rows), never inventing missing fields, AI-disabled behavior, evidence quotes, multiline suppliers, image-style auto-approve confidence |
 | `test_analytics.py` | 5 | Monthly/yearly totals + currency filter, default currency and duplicate exclusion, duplicate identity counted once, missing date/total reporting, authentication |
 | `test_api.py` | 30 | Auth (4), upload (4), document list/detail (3), findings (1), search (2), reprocess/jobs (2), meta (1), corrections (1), worker retry (1), approval (2), reconciliation dismissal (4), spreadsheet approval (3), cross-verification workbook (2) |
 
