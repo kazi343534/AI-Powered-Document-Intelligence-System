@@ -413,6 +413,7 @@ def _process_spreadsheet(
                 document_id=document.id,
                 sheet_name=sheet.name,
                 row_number=row["row_number"],
+                row_type=str((row["normalized"] or {}).get("row_type") or "invoice"),
                 data=row["data"],
                 normalized=row["normalized"],
                 warnings=row["warnings"],

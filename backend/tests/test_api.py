@@ -923,3 +923,88 @@ class TestCrossVerificationWorkbook:
         assert first["normalized"]["unit_price"] == "3200"
         assert first["normalized"]["line_total"] == "6400"
 
+
+
+class TestHybridSheetRowPersistence:
+    def test_invoice_and_line_items_share_source_row(
+        self, client, auth_headers, process_jobs, tmp_path
+    ):
+        import openpyxl
+
+        path = tmp_path / "hybrid.xlsx"
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = "March"
+        sheet.append(
+            [
+                "Invoice Number",
+                "Invoice Date",
+                "Supplier",
+                "Customer",
+                "Currency",
+                "Description",
+                "Qty",
+                "Unit Price",
+                "Amount",
+                "Subtotal",
+                "Tax",
+                "Total",
+            ]
+        )
+        for description, qty, price, amount in (
+            ("Laptop stand", 2, 30, 60),
+            ("USB hub", 1, 20, 20),
+        ):
+            sheet.append(
+                [
+                    "INV-H-1",
+                    "2025-03-05",
+                    "Orchid Tech",
+                    "Stark Industries",
+                    "USD",
+                    description,
+                    qty,
+                    price,
+                    amount,
+                    80,
+                    8,
+                    88,
+                ]
+            )
+        workbook.save(str(path))
+
+        with open(path, "rb") as handle:
+            response = client.post(
+                "/api/v1/documents",
+                files={
+                    "files": (
+                        path.name,
+                        handle,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+                },
+                headers=auth_headers,
+            )
+        assert response.status_code == 202, response.text
+        document_id = response.json()["documents"][0]["id"]
+        process_jobs(document_id)
+
+        response = client.get(
+            f"/api/v1/documents/{document_id}/sheet-rows",
+            params={"row_type": "all"},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["invoice_total"] == 1
+        assert body["line_item_total"] == 2
+        invoice = next(item for item in body["items"] if item["row_type"] == "invoice")
+        line_items = [
+            item for item in body["items"] if item["row_type"] == "line_item"
+        ]
+        # The parent invoice row and the first detail row come from the same
+        # Excel row; row_type must be part of the uniqueness key so both can
+        # be persisted without a UniqueViolation.
+        assert any(item["row_number"] == invoice["row_number"] for item in line_items)
+        assert invoice["line_item_count"] == 2
+        assert all(item["parent_invoice_number"] == "INV-H-1" for item in line_items)

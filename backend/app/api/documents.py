@@ -446,7 +446,9 @@ def get_sheet_rows(
     )
 
     def _type(item: SheetRow) -> str:
-        return str((item.normalized or {}).get("row_type") or "invoice")
+        return str(
+            item.row_type or (item.normalized or {}).get("row_type") or "invoice"
+        )
 
     invoice_rows = [item for item in rows if _type(item) == "invoice"]
     line_item_rows = [item for item in rows if _type(item) == "line_item"]

@@ -292,7 +292,9 @@ class ProcessingJob(Base):
 class SheetRow(Base):
     __tablename__ = "sheet_rows"
     __table_args__ = (
-        UniqueConstraint("document_id", "sheet_name", "row_number", name="uq_sheet_row"),
+        UniqueConstraint(
+            "document_id", "sheet_name", "row_number", "row_type", name="uq_sheet_row"
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
@@ -301,6 +303,7 @@ class SheetRow(Base):
     )
     sheet_name: Mapped[str] = mapped_column(String(255), default="Sheet1")
     row_number: Mapped[int] = mapped_column(Integer, default=1)
+    row_type: Mapped[str] = mapped_column(String(20), default="invoice")
     data: Mapped[dict] = mapped_column(JSONType, default=dict)
     normalized: Mapped[dict] = mapped_column(JSONType, default=dict)
     warnings: Mapped[list] = mapped_column(JSONType, default=list)

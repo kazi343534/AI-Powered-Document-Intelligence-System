@@ -83,6 +83,49 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
 
     if settings.is_postgres:
+        # Existing deployments predate the row_type column. Add it and widen
+        # the uniqueness key so a hybrid spreadsheet can persist an invoice
+        # row and its child line-item rows that share the same source row.
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE sheet_rows "
+                    "ADD COLUMN IF NOT EXISTS row_type VARCHAR(20) "
+                    "NOT NULL DEFAULT 'invoice'"
+                )
+            )
+            conn.execute(
+                text(
+                    "UPDATE sheet_rows "
+                    "SET row_type = COALESCE(normalized->>'row_type', 'invoice') "
+                    "WHERE row_type IS DISTINCT FROM "
+                    "COALESCE(normalized->>'row_type', 'invoice')"
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    DO $$
+                    BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1
+                            FROM pg_constraint c
+                            JOIN pg_class t ON t.oid = c.conrelid
+                            WHERE t.relname = 'sheet_rows'
+                              AND c.conname = 'uq_sheet_row'
+                              AND pg_get_constraintdef(c.oid) LIKE '%row_type%'
+                        ) THEN
+                            ALTER TABLE sheet_rows
+                                DROP CONSTRAINT IF EXISTS uq_sheet_row;
+                            ALTER TABLE sheet_rows
+                                ADD CONSTRAINT uq_sheet_row
+                                UNIQUE (document_id, sheet_name, row_number, row_type);
+                        END IF;
+                    END
+                    $$;
+                    """
+                )
+            )
         # Indexes that SQLAlchemy cannot express portably.
         with engine.begin() as conn:
             conn.execute(
